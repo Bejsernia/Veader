@@ -1,6 +1,6 @@
 # Veader
 
-Veader 是一个面向 Android / iOS 的本地优先漫画阅读器，目前处于开发分支阶段（`development`）。项目使用 Expo、React Native、TypeScript 和 SQLite。
+Veader 是一个面向 Android / iOS 的本地优先漫画阅读器，目前处于开发分支阶段（`develop`）。项目使用 Expo、React Native、TypeScript 和 SQLite。
 
 ## 当前状态
 
@@ -90,4 +90,4 @@ scripts/                        启动与 Android 构建脚本
 
 ## Git 工作流
 
-当前仓库使用开发分支 `development`。功能完成并经过 Android 验证前，不将其视为正式发布版本；本地提交不会自动推送到远程仓库。
+当前仓库使用开发分支 `develop`。功能完成并经过 Android 验证前，不将其视为正式发布版本；本地提交不会自动推送到远程仓库。
