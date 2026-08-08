@@ -57,10 +57,25 @@ function SeriesDetail({ series, chapters: seriesChapters, back, openChapter, con
 
 function Recent({ series, openSeries, clearHistory }: { series: LibrarySeries[]; openSeries: (value: LibrarySeries) => void; clearHistory: (id: number) => void }) {
   const readSeries = series.filter(item => item.currentChapterId !== null);
+  const now = Date.now(); const day = 24 * 60 * 60 * 1000;
+  const groups = [
+    { label: '今天', items: readSeries.filter(item => now - item.updatedAt < day) },
+    { label: '一周内', items: readSeries.filter(item => { const age = now - item.updatedAt; return age >= day && age < 7 * day; }) },
+    { label: '更早', items: readSeries.filter(item => now - item.updatedAt >= 7 * day) },
+  ].filter(group => group.items.length > 0);
   const { isDark } = useTheme();
-  return <ScrollView contentContainerStyle={[styles.page, isDark && styles.pageDark]}><Text style={[styles.title, isDark && styles.textPrimaryDark]}>最近阅读</Text>{readSeries.length === 0 && <View style={styles.empty}><Ionicons name="time-outline" size={36} color="#B2ADB7" /><Text style={[styles.meta, isDark && styles.textMutedDark]}>开始阅读一个章节后，它会出现在这里</Text></View>}{readSeries.map(item => <View key={item.id} style={styles.historyRow}>{item.coverUri ? <Image source={{ uri: item.coverUri }} style={styles.historyCover} /> : <View style={styles.historyFormat}><Text style={styles.formatText}>漫画</Text></View>}<Pressable style={styles.flex} onPress={() => openSeries(item)}><Text style={[styles.rowTitle, isDark && styles.textPrimaryDark]}>{item.title}</Text><Text style={[styles.meta, isDark && styles.textMutedDark]}>阅读至 {item.currentChapterTitle || '章节'} · {Math.round(item.progress * 100)}%</Text></Pressable><Pressable onPress={() => clearHistory(item.id)} style={styles.historyDelete}><Ionicons name="trash-outline" size={20} color={isDark ? '#B8B1C2' : '#9A949F'} /></Pressable></View>)}</ScrollView>;
+  return <ScrollView contentContainerStyle={[styles.page, isDark && styles.pageDark]}>
+    <Text style={[styles.title, { marginBottom: 8 }, isDark && styles.textPrimaryDark]}>最近阅读</Text>
+    {readSeries.length === 0 && <View style={styles.empty}><Ionicons name="time-outline" size={36} color="#B2ADB7" /><Text style={[styles.meta, isDark && styles.textMutedDark]}>开始阅读一个章节后，它会出现在这里</Text></View>}
+    {groups.map(group => <View key={group.label} style={{ marginTop: 18 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+        <Text style={{ color: isDark ? '#B8B1C2' : '#8A8691', fontSize: 12, fontWeight: '700' }}>{group.label}</Text>
+        <View style={{ flex: 1, height: 1, backgroundColor: isDark ? '#342E3B' : '#E4E1E7' }} />
+      </View>
+      {group.items.map(item => <View key={item.id} style={styles.historyRow}>{item.coverUri ? <Image source={{ uri: item.coverUri }} style={styles.historyCover} /> : <View style={styles.historyFormat}><Text style={styles.formatText}>漫画</Text></View>}<Pressable style={styles.flex} onPress={() => openSeries(item)}><Text style={[styles.rowTitle, isDark && styles.textPrimaryDark]}>{item.title}</Text><Text style={[styles.meta, isDark && styles.textMutedDark]}>阅读至 {item.currentChapterTitle || '章节'} · {Math.round(item.progress * 100)}%</Text></Pressable><Pressable onPress={() => clearHistory(item.id)} style={styles.historyDelete}><Ionicons name="trash-outline" size={20} color={isDark ? '#B8B1C2' : '#9A949F'} /></Pressable></View>)}
+    </View>)}
+  </ScrollView>;
 }
-
 function Me({ navigate }: { navigate: (screen: Screen) => void }) {
   const groups = [[['folder-open-outline', '漫画源']], [['information-circle-outline', '关于 Veader']]];
   const destinations: Record<string, Screen> = { '漫画源': 'sources', '关于 Veader': 'about' };
