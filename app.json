@@ -7,7 +7,7 @@
     "userInterfaceStyle": "automatic",
     "splash": { "backgroundColor": "#F8F7FA" },
     "ios": { "supportsTablet": true, "bundleIdentifier": "com.veader.reader" },
-    "android": { "package": "com.veader.reader", "adaptiveIcon": { "backgroundColor": "#7C5CFC" } },
+    "android": { "package": "com.veader.reader", "adaptiveIcon": { "backgroundColor": "#FFFFFF" } },
     "web": { "bundler": "metro" }
   }
 }
