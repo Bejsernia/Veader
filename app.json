@@ -1,0 +1,13 @@
+{
+  "expo": {
+    "name": "Veader",
+    "slug": "veader",
+    "version": "0.1.0",
+    "orientation": "default",
+    "userInterfaceStyle": "automatic",
+    "splash": { "backgroundColor": "#F8F7FA" },
+    "ios": { "supportsTablet": true, "bundleIdentifier": "com.veader.reader" },
+    "android": { "package": "com.veader.reader", "adaptiveIcon": { "backgroundColor": "#7C5CFC" } },
+    "web": { "bundler": "metro" }
+  }
+}

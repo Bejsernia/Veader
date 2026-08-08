@@ -1,0 +1,63 @@
+# Dependencies and package-manager logs
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Expo / Metro local state
+.expo/
+.expo-shared/
+.tmp/
+.cache/
+
+# Local SDKs, emulators and machine-specific configuration
+.tools/
+android/local.properties
+*.keystore
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Android generated output (keep android source code tracked)
+android/.gradle/
+android/build/
+android/app/build/
+android/app/.cxx/
+android/captures/
+
+# iOS generated output
+ios/Pods/
+ios/build/
+ios/DerivedData/
+*.xcuserstate
+
+# Build artifacts and distributable packages
+dist/
+build/
+*.apk
+*.aab
+*.ipa
+
+# Local books, covers, screenshots and emulator logs
+book/*
+!book/.gitkeep
+emulator-*.png
+qemu-system-*.log
+
+# Environment files and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.crt
+
+# Editors and operating-system files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
