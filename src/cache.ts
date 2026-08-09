@@ -25,10 +25,11 @@ async function listFiles(uri: string): Promise<CacheFile[]> {
   try { children = await FileSystem.readDirectoryAsync(uri); } catch { return []; }
   const files: CacheFile[] = [];
   for (const child of children) {
-    const info = await FileSystem.getInfoAsync(child, { size: true });
+    const childUri = child.startsWith('file://') || child.startsWith('content://') ? child : `${uri.endsWith('/') ? uri : `${uri}/`}${child}`;
+    const info = await FileSystem.getInfoAsync(childUri, { size: true });
     if (!info.exists) continue;
-    if ((info as any).isDirectory) files.push(...await listFiles(child));
-    else files.push({ uri: child, size: (info as any).size ?? 0, modified: (info as any).modificationTime ?? 0 });
+    if ((info as any).isDirectory) files.push(...await listFiles(childUri));
+    else files.push({ uri: childUri, size: (info as any).size ?? 0, modified: (info as any).modificationTime ?? 0 });
   }
   return files;
 }
@@ -73,5 +74,8 @@ export async function clearAppCache() {
   if (!FileSystem.cacheDirectory) return;
   let children: string[];
   try { children = await FileSystem.readDirectoryAsync(FileSystem.cacheDirectory); } catch { return; }
-  await Promise.all(children.map(uri => FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => undefined)));
+  await Promise.all(children.map(child => {
+    const uri = child.startsWith('file://') || child.startsWith('content://') ? child : `${FileSystem.cacheDirectory!.endsWith('/') ? FileSystem.cacheDirectory : `${FileSystem.cacheDirectory}/`}${child}`;
+    return FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => undefined);
+  }));
 }
