@@ -4,6 +4,7 @@ import { XMLParser } from 'fast-xml-parser';
 import { NativeModules, Platform } from 'react-native';
 import type { StoredBook } from './library';
 import { epubEntryFromUri, extractEpubPage, isEpubEntryUri, normalizePath, scanEpub } from './epub-native';
+import { trimCacheToLimit } from './cache';
 
 export type RenderableContent =
   | { kind: 'html'; html: string }
@@ -13,6 +14,11 @@ export type EpubComicPage = { index: number; imageUri: string };
 export type EpubComic = { title: string; author: string; direction: 'ltr' | 'rtl'; pages: EpubComicPage[] };
 export type PdfPage = { index: number; imageUri: string };
 
+type MobiSession = { sourceUri: string; bytes: Uint8Array; records: number[]; fingerprint: string };
+const mobiSessions = new Map<string, MobiSession>();
+const MOBI_ENTRY_PREFIX = 'mobi-entry://';
+const PDF_ENTRY_PREFIX = 'pdf-entry://';
+
 export async function loadEpubComic(book: StoredBook): Promise<EpubComic> {
   // Metadata caching and source invalidation are centralized in scanEpub.
   // Do not retain a second module-level Promise cache here: it could outlive
@@ -21,10 +27,74 @@ export async function loadEpubComic(book: StoredBook): Promise<EpubComic> {
 }
 
 export async function loadEpubPage(book: StoredBook, page: EpubComicPage, sessionId?: string) {
+  if (book.format === 'pdf') return loadPdfPage(book, page, 1200);
+  if (book.format === 'mobi') return loadMobiPage(book, page, sessionId || 'default');
   if (!isEpubEntryUri(page.imageUri)) return page.imageUri;
   // The scanned comic is shared by readers. Keep its entry URI immutable;
   // resolved files are session-scoped and must not leak after cleanup.
   return extractEpubPage(book.localUri, epubEntryFromUri(page.imageUri), sessionId || 'default');
+}
+
+export async function loadPdfComic(book: StoredBook): Promise<EpubComic> {
+  const pageCount = await getPdfPageCount(book.localUri);
+  if (pageCount <= 0) throw new Error('PDF 没有可读取的页面');
+  return {
+    title: book.title,
+    author: book.author,
+    direction: 'ltr',
+    pages: Array.from({ length: pageCount }, (_, index) => ({ index, imageUri: PDF_ENTRY_PREFIX + index })),
+  };
+}
+
+export async function loadPdfPage(book: StoredBook, page: EpubComicPage, targetWidth: number) {
+  const index = Number(page.imageUri.slice(PDF_ENTRY_PREFIX.length));
+  if (!Number.isFinite(index)) throw new Error('PDF 页面索引无效');
+  return renderPdfPage(book.localUri, index, targetWidth);
+}
+
+export async function loadMobiComic(book: StoredBook, sessionId: string): Promise<EpubComic> {
+  const bytes = await readBinary(book.localUri);
+  const parsed = parseMobi(bytes);
+  const fingerprint = `${bytes.length}:${bytes[0] ?? 0}:${bytes[bytes.length - 1] ?? 0}`;
+  mobiSessions.set(sessionId, { sourceUri: book.localUri, bytes, records: parsed.imageRecords, fingerprint });
+  while (mobiSessions.size > 4) mobiSessions.delete(mobiSessions.keys().next().value as string);
+  return {
+    title: parsed.title || book.title,
+    author: parsed.author || book.author,
+    direction: 'ltr',
+    pages: parsed.imageRecords.map((record, index) => ({ index, imageUri: MOBI_ENTRY_PREFIX + record })),
+  };
+}
+
+export async function loadMobiPage(book: StoredBook, page: EpubComicPage, sessionId: string) {
+  let session = mobiSessions.get(sessionId);
+  if (!session || session.sourceUri !== book.localUri) {
+    await loadMobiComic(book, sessionId);
+    session = mobiSessions.get(sessionId);
+  }
+  if (!session) throw new Error('MOBI 阅读会话已失效');
+  const recordIndex = Number(page.imageUri.slice(MOBI_ENTRY_PREFIX.length));
+  const recordStart = readU32(session.bytes, 78 + recordIndex * 8);
+  const recordEnd = recordIndex + 1 < readU16(session.bytes, 76) ? readU32(session.bytes, 78 + (recordIndex + 1) * 8) : session.bytes.length;
+  if (recordStart >= recordEnd || recordEnd > session.bytes.length) throw new Error('MOBI 图片记录无效');
+  const bytes = session.bytes.slice(recordStart, recordEnd);
+  const extension = bytes[0] === 0xff && bytes[1] === 0xd8 ? 'jpg' : bytes[0] === 0x89 && bytes[1] === 0x50 ? 'png' : bytes[0] === 0x47 && bytes[1] === 0x49 ? 'gif' : 'jpg';
+  const root = FileSystem.cacheDirectory;
+  if (!root) throw new Error('应用缓存目录不可用');
+  const uri = `${root}mobi-pages/${sessionId}/${session.fingerprint}-${page.index}.${extension}`;
+  const info = await FileSystem.getInfoAsync(uri);
+  if (!info.exists) {
+    await FileSystem.makeDirectoryAsync(`${root}mobi-pages/${sessionId}`, { intermediates: true });
+    await FileSystem.writeAsStringAsync(uri, bytesToBase64(bytes), { encoding: FileSystem.EncodingType.Base64 });
+    await trimCacheToLimit();
+  }
+  return uri;
+}
+
+export function clearMobiSession(sessionId: string) {
+  mobiSessions.delete(sessionId);
+  const root = FileSystem.cacheDirectory;
+  return root ? FileSystem.deleteAsync(`${root}mobi-pages/${sessionId}`, { idempotent: true }) : Promise.resolve();
 }
 
 export function clearEpubComicCache() {
@@ -72,6 +142,71 @@ export async function loadRenderableContent(book: StoredBook): Promise<Renderabl
   const base64 = await FileSystem.readAsStringAsync(book.localUri, { encoding: FileSystem.EncodingType.Base64 });
   if (book.format === 'epub') return { kind: 'html', html: await renderEpub(base64, book.title) };
   return { kind: 'html', html: renderMobi(base64ToBytes(base64), book.title) };
+}
+
+async function readBinary(uri: string) {
+  const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+  return base64ToBytes(base64);
+}
+
+function parseMobi(bytes: Uint8Array) {
+  if (bytes.length < 100) throw new Error('MOBI 文件过小');
+  const recordCount = readU16(bytes, 76);
+  const record0 = readU32(bytes, 78);
+  const compression = readU16(bytes, record0);
+  const textRecordCount = readU16(bytes, record0 + 8);
+  const chunks: Uint8Array[] = [];
+  for (let index = 1; index <= textRecordCount && index < recordCount; index++) {
+    const start = readU32(bytes, 78 + index * 8);
+    const end = index + 1 < recordCount ? readU32(bytes, 78 + (index + 1) * 8) : bytes.length;
+    const record = bytes.slice(start, end);
+    chunks.push(compression === 2 ? decompressPalmDoc(record) : record);
+  }
+  const html = decodeText(concat(chunks)).replace(/\0+$/g, '');
+  const imageRecords: number[] = [];
+  for (let index = textRecordCount + 1; index < recordCount; index++) {
+    const start = readU32(bytes, 78 + index * 8);
+    const end = index + 1 < recordCount ? readU32(bytes, 78 + (index + 1) * 8) : bytes.length;
+    const first = bytes[start] ?? 0;
+    const second = bytes[start + 1] ?? 0;
+    if ((first === 0xff && second === 0xd8) || (first === 0x89 && second === 0x50) || (first === 0x47 && second === 0x49)) imageRecords.push(index);
+  }
+  if (!imageRecords.length) throw new Error('MOBI 中没有找到漫画图片');
+  const title = readMobiTitle(bytes, record0);
+  const author = readMobiAuthor(bytes, record0);
+  return { title, author, imageRecords, html };
+}
+
+function readMobiTitle(bytes: Uint8Array, record0: number) {
+  const mobi = record0 + 16;
+  if (ascii(bytes, mobi, 4) !== 'MOBI') return '';
+  const offset = readU32(bytes, mobi + 84); const length = readU32(bytes, mobi + 88);
+  return decodeText(bytes.slice(record0 + offset, record0 + offset + length)).replace(/\0/g, '').trim();
+}
+
+function readMobiAuthor(bytes: Uint8Array, record0: number) {
+  const mobi = record0 + 16;
+  if (ascii(bytes, mobi, 4) !== 'MOBI') return '';
+  const headerLength = readU32(bytes, mobi + 4); const exth = mobi + headerLength;
+  if (ascii(bytes, exth, 4) !== 'EXTH') return '';
+  const count = readU32(bytes, exth + 8); let offset = exth + 12;
+  for (let index = 0; index < count && offset + 8 <= bytes.length; index++) {
+    const type = readU32(bytes, offset); const size = readU32(bytes, offset + 4);
+    if (size < 8 || offset + size > bytes.length) break;
+    if (type === 100) return decodeText(bytes.slice(offset + 8, offset + size)).replace(/\0/g, '').trim();
+    offset += size;
+  }
+  return '';
+}
+
+function bytesToBase64(bytes: Uint8Array) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  let output = ''; for (let index = 0; index < bytes.length; index += 3) { const a = bytes[index] ?? 0; const b = bytes[index + 1]; const c = bytes[index + 2]; output += alphabet[a >> 2]! + alphabet[((a & 3) << 4) | ((b ?? 0) >> 4)]! + (b === undefined ? '=' : alphabet[((b & 15) << 2) | ((c ?? 0) >> 6)]!) + (c === undefined ? '=' : alphabet[c & 63]!); }
+  return output;
+}
+
+function ascii(bytes: Uint8Array, offset: number, length: number) {
+  return String.fromCharCode(...bytes.slice(offset, offset + length));
 }
 
 async function renderEpub(base64: string, title: string) {
