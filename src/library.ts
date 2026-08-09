@@ -88,18 +88,18 @@ export async function listSeries(options: { refreshMetadata?: boolean } = {}): P
     (SELECT chapter_title FROM chapters current_chapter WHERE current_chapter.id = s.current_chapter_id) AS current_chapter_title,
     (SELECT chapter_number FROM chapters current_chapter WHERE current_chapter.id = s.current_chapter_id) AS current_chapter_number
     FROM series s LEFT JOIN chapters c ON c.series_id = s.id GROUP BY s.id ORDER BY s.updated_at DESC`);
-  for (const row of rows) {
+  await Promise.all(rows.map(async row => {
     await restoreSeriesCover(row, db);
     if (options.refreshMetadata || !String(row.author ?? '').trim()) {
       const firstChapter = await db.getFirstAsync<any>('SELECT local_uri, original_name, format FROM chapters WHERE series_id = ? ORDER BY chapter_number, original_name LIMIT 1', row.id);
-      if (!firstChapter) continue;
+      if (!firstChapter) return;
       const metadata = await scanSeriesMetadata(firstChapter.local_uri, firstChapter.original_name, firstChapter.format as BookFormat);
       if (metadata.author !== String(row.author ?? '')) {
         row.author = metadata.author;
         await db.runAsync('UPDATE series SET author = ? WHERE id = ?', metadata.author, row.id);
       }
     }
-  }
+  }));
   return rows.map(row => ({ id: row.id, title: row.title, author: row.author, sourceUri: row.source_uri, coverUri: row.cover_uri, currentChapterTitle: row.current_chapter_title, currentChapterNumber: row.current_chapter_number,
     chapterSearchText: String(row.chapter_search ?? ''), progress: row.progress, currentChapterId: row.current_chapter_id, chapterCount: row.chapter_count, updatedAt: row.updated_at }));
 }
