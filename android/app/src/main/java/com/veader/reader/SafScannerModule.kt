@@ -7,9 +7,11 @@ import com.facebook.react.bridge.*
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.io.InputStream
 import java.net.URLDecoder
 import java.util.zip.ZipInputStream
+import java.util.zip.ZipFile
 import javax.xml.parsers.DocumentBuilderFactory
 import org.w3c.dom.Document
 
@@ -95,6 +97,55 @@ class SafScannerModule(context: ReactApplicationContext) : ReactContextBaseJavaM
       }
       promise.resolve(written)
     } catch (error: Exception) { promise.reject("EPUB_ENTRIES_FAILED", error.message, error) }
+  }
+
+  /** Stage one active EPUB as a bounded, session-scoped archive so random page
+   * seeks use ZipFile's central directory instead of rescanning the ZIP from byte 0. */
+  @ReactMethod
+  fun prepareEpubSession(uri: String, sessionId: String, promise: Promise) {
+    try {
+      val directory = File(reactApplicationContext.cacheDir, "epub-archives")
+      if (!directory.exists()) directory.mkdirs()
+      val target = File(directory, "${safeSession(sessionId)}.epub")
+      if (!target.exists() || target.length() == 0L) {
+        openInput(uri).use { input -> FileOutputStream(target).use { output -> input.copyTo(output, 256 * 1024) } }
+      }
+      promise.resolve(target.toURI().toString())
+    } catch (error: Exception) { promise.reject("EPUB_SESSION_FAILED", error.message, error) }
+  }
+
+  @ReactMethod
+  fun extractEpubEntriesFromSession(archiveUri: String, entries: ReadableArray, targetDirUri: String, fileNames: ReadableArray, promise: Promise) {
+    try {
+      val wanted = mutableMapOf<String, String>()
+      val count = minOf(entries.size(), fileNames.size())
+      for (index in 0 until count) {
+        val entry = entries.getString(index) ?: continue
+        val fileName = fileNames.getString(index) ?: continue
+        wanted[normalizePath(entry)] = fileName
+      }
+      val directory = File(Uri.parse(targetDirUri).path ?: throw Exception("无效的缓存目录"))
+      if (!directory.exists() && !directory.mkdirs()) throw Exception("无法创建页面缓存目录")
+      val archivePath = Uri.parse(archiveUri).path ?: throw Exception("无效的 EPUB 会话")
+      val written = Arguments.createArray()
+      ZipFile(archivePath).use { zip ->
+        wanted.forEach { (entryName, fileName) ->
+          val entry = zip.getEntry(entryName) ?: throw Exception("EPUB 页面不存在")
+          zip.getInputStream(entry).use { input -> File(directory, fileName).outputStream().use { output -> input.copyTo(output, 256 * 1024) } }
+          written.pushString(fileName)
+        }
+      }
+      promise.resolve(written)
+    } catch (error: Exception) { promise.reject("EPUB_SESSION_ENTRY_FAILED", error.message, error) }
+  }
+
+  @ReactMethod
+  fun releaseEpubSession(sessionId: String, promise: Promise) {
+    try {
+      val target = File(File(reactApplicationContext.cacheDir, "epub-archives"), "${safeSession(sessionId)}.epub")
+      if (target.exists()) target.delete()
+      promise.resolve(null)
+    } catch (error: Exception) { promise.reject("EPUB_SESSION_RELEASE_FAILED", error.message, error) }
   }
 
   private data class EpubScan(val title: String, val author: String, val direction: String, val pages: List<String>)
@@ -184,6 +235,8 @@ class SafScannerModule(context: ReactApplicationContext) : ReactContextBaseJavaM
     }
     return parts.joinToString("/")
   }
+
+  private fun safeSession(value: String): String = value.replace(Regex("[^A-Za-z0-9._-]"), "_").take(120)
 
   private fun collectBooks(folder: DocumentFile, result: WritableArray) {
     folder.listFiles().forEach { file ->

@@ -74,7 +74,7 @@ export async function trimCacheToLimit(limitMb?: number) {
 
 export async function clearAppCache() {
   if (!FileSystem.cacheDirectory) return;
-  const roots = ['pdf-pages', 'cropped-pages'];
+  const roots = ['pdf-pages', 'mobi-pages', 'mobi-pages-native', 'cropped-pages'];
   await Promise.all(roots.map(root => FileSystem.deleteAsync(`${FileSystem.cacheDirectory}${root}/`, { idempotent: true }).catch(() => undefined)));
   const epubRoot = `${FileSystem.cacheDirectory}epub-pages/`;
   try {
@@ -85,7 +85,7 @@ export async function clearAppCache() {
 
 async function listPageCacheFiles() {
   if (!FileSystem.cacheDirectory) return [] as CacheFile[];
-  const roots = ['epub-pages', 'pdf-pages', 'cropped-pages'];
+  const roots = ['epub-pages', 'pdf-pages', 'mobi-pages', 'mobi-pages-native', 'cropped-pages'];
   const files = (await Promise.all(roots.map(root => listFiles(`${FileSystem.cacheDirectory}${root}/`)))).flat();
   return files.filter(file => !file.uri.includes('/cover-'));
 }

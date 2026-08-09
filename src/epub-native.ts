@@ -21,6 +21,7 @@ const pendingPages = new Map<string, PendingPage>();
 const pendingTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const activePages = new Map<string, Promise<string>>();
 const sessionPageUris = new Map<string, Map<string, string>>();
+const archiveSessions = new Map<string, Promise<string>>();
 const cancelledSessions = new Set<string>();
 
 export function clearEpubMetadataCache() {
@@ -116,7 +117,14 @@ async function flushPageQueue(queueKey: string) {
       if (cancelledSessions.has(sessionId)) throw new Error('Reader session closed');
       await FileSystem.makeDirectoryAsync(targetDir, { intermediates: true });
       const scanner = (NativeModules as any).SafScanner;
-      if (Platform.OS === 'android' && scanner?.extractEpubEntries) {
+      if (Platform.OS === 'android' && scanner?.prepareEpubSession && scanner?.extractEpubEntriesFromSession && sessionId.startsWith('reader-')) {
+        let archive = archiveSessions.get(sessionId);
+        if (!archive) {
+          archive = Promise.resolve(scanner.prepareEpubSession(missing[0]!.sourceUri, sessionId));
+          archiveSessions.set(sessionId, archive);
+        }
+        await scanner.extractEpubEntriesFromSession(await archive, missing.map(item => item.entry), targetDir, missing.map(item => item.fileName));
+      } else if (Platform.OS === 'android' && scanner?.extractEpubEntries) {
         await scanner.extractEpubEntries(missing[0]!.sourceUri, missing.map(item => item.entry), targetDir, missing.map(item => item.fileName));
       } else if (Platform.OS === 'android' && scanner?.extractEpubEntry) {
         for (const item of missing) {
@@ -144,6 +152,11 @@ async function flushPageQueue(queueKey: string) {
 export async function clearEpubSession(sessionId: string) {
   cancelledSessions.add(sessionId);
   sessionPageUris.delete(sessionId);
+  const scanner = (NativeModules as any).SafScanner;
+  archiveSessions.delete(sessionId);
+  if (Platform.OS === 'android' && scanner?.releaseEpubSession && sessionId.startsWith('reader-')) {
+    await scanner.releaseEpubSession(sessionId).catch(() => undefined);
+  }
   const sessionError = new Error('Reader session closed');
   for (const [queueKey, timer] of pendingTimers) {
     if (!queueKey.endsWith('\n' + sessionId)) continue;

@@ -14,7 +14,7 @@ export type EpubComicPage = { index: number; imageUri: string };
 export type EpubComic = { title: string; author: string; direction: 'ltr' | 'rtl'; pages: EpubComicPage[] };
 export type PdfPage = { index: number; imageUri: string };
 
-type MobiSession = { sourceUri: string; bytes: Uint8Array; records: number[]; fingerprint: string };
+type MobiSession = { sourceUri: string; bytes?: Uint8Array; records: number[]; fingerprint: string; native: boolean };
 const mobiSessions = new Map<string, MobiSession>();
 const MOBI_ENTRY_PREFIX = 'mobi-entry://';
 const PDF_ENTRY_PREFIX = 'pdf-entry://';
@@ -53,10 +53,25 @@ export async function loadPdfPage(book: StoredBook, page: EpubComicPage, targetW
 }
 
 export async function loadMobiComic(book: StoredBook, sessionId: string): Promise<EpubComic> {
+  const native = (NativeModules as any).DocumentReader;
+  if (Platform.OS === 'android' && native?.getMobiInfo && native?.renderMobiPage) {
+    const result = await native.getMobiInfo(book.localUri);
+    const records: number[] = Array.isArray(result?.imageRecords) ? (result.imageRecords as unknown[]).map((value: unknown) => Number(value)).filter((value: number) => Number.isFinite(value)) : [];
+    if (!records.length) throw new Error('MOBI 中没有找到漫画图片');
+    const fingerprint = `${book.localUri}:${records.length}:${String(result?.title ?? '')}`;
+    mobiSessions.set(sessionId, { sourceUri: book.localUri, records, fingerprint, native: true });
+    while (mobiSessions.size > 4) mobiSessions.delete(mobiSessions.keys().next().value as string);
+    return {
+      title: String(result?.title || book.title),
+      author: String(result?.author || book.author || ''),
+      direction: 'ltr',
+      pages: records.map((record, index) => ({ index, imageUri: MOBI_ENTRY_PREFIX + record })),
+    };
+  }
   const bytes = await readBinary(book.localUri);
   const parsed = parseMobi(bytes);
   const fingerprint = `${bytes.length}:${bytes[0] ?? 0}:${bytes[bytes.length - 1] ?? 0}`;
-  mobiSessions.set(sessionId, { sourceUri: book.localUri, bytes, records: parsed.imageRecords, fingerprint });
+  mobiSessions.set(sessionId, { sourceUri: book.localUri, bytes, records: parsed.imageRecords, fingerprint, native: false });
   while (mobiSessions.size > 4) mobiSessions.delete(mobiSessions.keys().next().value as string);
   return {
     title: parsed.title || book.title,
@@ -74,6 +89,11 @@ export async function loadMobiPage(book: StoredBook, page: EpubComicPage, sessio
   }
   if (!session) throw new Error('MOBI 阅读会话已失效');
   const recordIndex = Number(page.imageUri.slice(MOBI_ENTRY_PREFIX.length));
+  const native = (NativeModules as any).DocumentReader;
+  if (session.native && Platform.OS === 'android' && native?.renderMobiPage) {
+    return String(await native.renderMobiPage(book.localUri, recordIndex, 1600));
+  }
+  if (!session.bytes) throw new Error('MOBI 阅读会话没有可用数据');
   const recordStart = readU32(session.bytes, 78 + recordIndex * 8);
   const recordEnd = recordIndex + 1 < readU16(session.bytes, 76) ? readU32(session.bytes, 78 + (recordIndex + 1) * 8) : session.bytes.length;
   if (recordStart >= recordEnd || recordEnd > session.bytes.length) throw new Error('MOBI 图片记录无效');

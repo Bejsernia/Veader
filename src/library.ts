@@ -162,7 +162,7 @@ async function persistCoverUri(seriesId: number, coverUri: string) {
 
 async function restoreSeriesCover(row: any, db: SQLite.SQLiteDatabase) {
   const first = await db.getFirstAsync<any>('SELECT local_uri, format FROM chapters WHERE series_id = ? ORDER BY chapter_number, original_name LIMIT 1', row.id);
-  if (!first || first.format !== 'epub') return;
+  if (!first) return;
   if (row.cover_uri) {
     try {
       const info = await FileSystem.getInfoAsync(row.cover_uri);
@@ -170,7 +170,7 @@ async function restoreSeriesCover(row: any, db: SQLite.SQLiteDatabase) {
     } catch { /* Regenerate a missing cover below. */ }
   }
   try {
-    const firstPage = await epubFirstPageUri(first.local_uri, row.id);
+    const firstPage = await firstPageUri(first.local_uri, first.format as BookFormat, row.id);
     if (!firstPage) return;
     const coverUri = await persistCoverUri(row.id, firstPage);
     row.cover_uri = coverUri;
@@ -213,7 +213,7 @@ async function syncIosFolderSelection(selection: FolderSelection, sourceName?: s
     }
     if (!existing?.cover_uri) {
       const first = await db.getFirstAsync<any>('SELECT local_uri, format FROM chapters WHERE series_id = ? ORDER BY chapter_number LIMIT 1', seriesId);
-      if (first?.format === 'epub') { const cover = await epubFirstPageUri(first.local_uri, seriesId); if (cover) await setSeriesCover(seriesId, cover); }
+      if (first?.format) { const cover = await firstPageUri(first.local_uri, first.format as BookFormat, seriesId); if (cover) await setSeriesCover(seriesId, cover); }
     }
   }
   const oldChapters = await db.getAllAsync<any>('SELECT c.id, c.local_uri, s.source_uri FROM chapters c JOIN series s ON s.id = c.series_id');
@@ -255,8 +255,8 @@ export async function configureLibraryRoot(): Promise<LibrarySeries[]> {
       const format = formatFromName(candidate.name)!; seenChapterUris.add(candidate.uri);
       let chapter: StoredChapter;
       try { chapter = await importChapter(candidate.uri, candidate.name, format, seriesId, chapterNumber++); } catch { continue; }
-      if (!existing?.cover_uri && chapterNumber === 2 && format === 'epub') {
-        const firstPage = await epubFirstPageUri(chapter.localUri, seriesId); if (firstPage) await setSeriesCover(seriesId, firstPage);
+      if (!existing?.cover_uri && chapterNumber === 2) {
+        const firstPage = await firstPageUri(chapter.localUri, format, seriesId); if (firstPage) await setSeriesCover(seriesId, firstPage);
       }
     }
     seriesCount++;
@@ -310,8 +310,8 @@ export async function refreshAllLibraries(): Promise<LibrarySeries[]> {
           seenChapterUris.add(candidate.uri);
           let chapter: StoredChapter;
           try { chapter = await importChapter(candidate.uri, candidate.name, format, seriesId, chapterNumber++); } catch { continue; }
-          if (!existing?.cover_uri && chapterNumber === 2 && format === 'epub') {
-            const firstPage = await epubFirstPageUri(chapter.localUri, seriesId); if (firstPage) await setSeriesCover(seriesId, firstPage);
+          if (!existing?.cover_uri && chapterNumber === 2) {
+            const firstPage = await firstPageUri(chapter.localUri, format, seriesId); if (firstPage) await setSeriesCover(seriesId, firstPage);
           }
         }
         seriesCount++;
@@ -363,7 +363,7 @@ export async function refreshAllLibraries(): Promise<LibrarySeries[]> {
             await importChapter(target, entry.name, format, seriesId, chapterNumber++);
           }
           seriesCount++;
-          if (!existing?.cover_uri) { const first = await db.getFirstAsync<any>('SELECT local_uri FROM chapters WHERE series_id = ? ORDER BY chapter_number LIMIT 1', seriesId); if (first && formatFromName(first.local_uri) === 'epub') { const cover = await epubFirstPageUri(first.local_uri, seriesId); if (cover) await setSeriesCover(seriesId, cover); } }
+        if (!existing?.cover_uri) { const first = await db.getFirstAsync<any>('SELECT local_uri FROM chapters WHERE series_id = ? ORDER BY chapter_number LIMIT 1', seriesId); if (first) { const firstFormat = formatFromName(first.local_uri); if (firstFormat) { const cover = await firstPageUri(first.local_uri, firstFormat, seriesId); if (cover) await setSeriesCover(seriesId, cover); } } }
         }
         const oldChapters = await db.getAllAsync<any>('SELECT c.id, c.local_uri, s.source_uri FROM chapters c JOIN series s ON s.id = c.series_id');
         for (const item of oldChapters) if (typeof item.source_uri === 'string' && item.source_uri.startsWith(`${source.endpoint}#series=`) && !seenChapterUris.has(item.local_uri)) await db.runAsync('DELETE FROM chapters WHERE id = ?', item.id);
@@ -406,6 +406,21 @@ async function epubFirstPageUri(uri: string, seriesId: number): Promise<string |
     const scanned = await scanEpub(uri); const page = scanned.pages[0]; if (!page) return null;
     return extractEpubPage(uri, epubEntryFromUri(page.imageUri), `cover-${seriesId}`);
   } catch { return null; }
+}
+
+async function firstPageUri(uri: string, format: BookFormat, seriesId: number): Promise<string | null> {
+  if (format === 'epub') return epubFirstPageUri(uri, seriesId);
+  if (Platform.OS !== 'android') return null;
+  const native = (NativeModules as any).DocumentReader;
+  try {
+    if (format === 'pdf' && native?.renderPdfPage) return String(await native.renderPdfPage(uri, 0, 720));
+    if (format === 'mobi' && native?.getMobiInfo && native?.renderMobiPage) {
+      const info = await native.getMobiInfo(uri);
+      const firstRecord = Array.isArray(info?.imageRecords) ? Number(info.imageRecords[0]) : NaN;
+      if (Number.isFinite(firstRecord)) return String(await native.renderMobiPage(uri, firstRecord, 720));
+    }
+  } catch { /* The source may be temporarily unavailable; restore will retry later. */ }
+  return null;
 }
 
 export async function listSources(): Promise<StoredSource[]> {
@@ -462,6 +477,13 @@ async function extractMetadata(uri: string, filename: string, format: BookFormat
   const fallback = { title: filename.replace(/\.(epub|mobi|pdf)$/i, ''), author: '' };
   try {
     if (format === 'epub') return await readEpubMetadata(uri, fallback);
+    if (format === 'mobi' && Platform.OS === 'android') {
+      const native = (NativeModules as any).DocumentReader;
+      if (native?.getMobiInfo) {
+        const result = await native.getMobiInfo(uri);
+        return { title: String(result?.title || fallback.title), author: String(result?.author || fallback.author) };
+      }
+    }
     const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
     const bytes = base64ToBytes(base64);
     if (format === 'mobi') return readMobiMetadata(bytes, fallback);
