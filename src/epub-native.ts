@@ -1,6 +1,9 @@
 import * as FileSystem from 'expo-file-system';
 import { unzip } from 'react-native-zip-archive';
 import { XMLParser } from 'fast-xml-parser';
+import JSZip from 'jszip';
+import { NativeModules, Platform } from 'react-native';
+import { trimCacheToLimit } from './cache';
 
 export type ExtractedEpub = {
   rootUri: string;
@@ -9,7 +12,120 @@ export type ExtractedEpub = {
   opf: any;
 };
 
+export type ScannedEpub = {
+  title: string;
+  author: string;
+  direction: 'ltr' | 'rtl';
+  pages: { index: number; imageUri: string }[];
+};
+
 const extractionCache = new Map<string, Promise<ExtractedEpub>>();
+const scanCache = new Map<string, Promise<ScannedEpub>>();
+const ENTRY_PREFIX = 'epub-entry://';
+
+export function scanEpub(sourceUri: string) {
+  let cached = scanCache.get(sourceUri);
+  if (!cached) {
+    cached = scanEpubSource(sourceUri);
+    scanCache.set(sourceUri, cached);
+  }
+  return cached;
+}
+
+export async function extractEpubPage(sourceUri: string, entry: string, sessionId: string) {
+  const cacheRoot = FileSystem.cacheDirectory;
+  if (!cacheRoot) throw new Error('应用缓存目录不可用');
+  const key = stableKey(entry);
+  const extension = entry.split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'img';
+  const targetUri = cacheRoot + 'epub-pages/' + sessionId + '/' + key + '.' + extension;
+  const info = await FileSystem.getInfoAsync(targetUri);
+  if (!info.exists) {
+    await FileSystem.makeDirectoryAsync(cacheRoot + 'epub-pages/' + sessionId + '/', { intermediates: true });
+    const scanner = (NativeModules as any).SafScanner;
+    if (Platform.OS === 'android' && scanner?.extractEpubEntry) {
+      const base64 = await scanner.extractEpubEntry(sourceUri, entry);
+      await FileSystem.writeAsStringAsync(targetUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+    } else {
+      await extractEpubEntryWithJsZip(sourceUri, entry, targetUri);
+    }
+  }
+  await trimCacheToLimit();
+  return targetUri;
+}
+
+export async function clearEpubSession(sessionId: string) {
+  if (!FileSystem.cacheDirectory) return;
+  await FileSystem.deleteAsync(FileSystem.cacheDirectory + 'epub-pages/' + sessionId, { idempotent: true });
+}
+
+export function isEpubEntryUri(value: string) {
+  return value.startsWith(ENTRY_PREFIX);
+}
+
+export function epubEntryFromUri(value: string) {
+  return decodeURIComponent(value.slice(ENTRY_PREFIX.length));
+}
+
+async function scanEpubSource(sourceUri: string): Promise<ScannedEpub> {
+  const scanner = (NativeModules as any).SafScanner;
+  if (Platform.OS === 'android' && scanner?.scanEpub) {
+    const result = await scanner.scanEpub(sourceUri);
+    const pages = Array.isArray(result.pages) ? result.pages : [];
+    return {
+      title: String(result.title ?? ''),
+      author: String(result.author ?? ''),
+      direction: result.direction === 'rtl' ? 'rtl' : 'ltr',
+      pages: pages.map((entry: string, index: number) => ({ index, imageUri: ENTRY_PREFIX + encodeURIComponent(entry) })),
+    };
+  }
+  return scanEpubWithJsZip(sourceUri);
+}
+
+async function scanEpubWithJsZip(sourceUri: string): Promise<ScannedEpub> {
+  const base64 = await FileSystem.readAsStringAsync(sourceUri, { encoding: FileSystem.EncodingType.Base64 });
+  const zip = await JSZip.loadAsync(base64, { base64: true });
+  const parser = new XMLParser({ ignoreAttributes: false, removeNSPrefix: true });
+  const containerText = await zip.file('META-INF/container.xml')?.async('text');
+  if (!containerText) throw new Error('EPUB 缺少 container.xml');
+  const rootfiles = parser.parse(containerText)?.container?.rootfiles?.rootfile;
+  const packagePath = normalizePath((Array.isArray(rootfiles) ? rootfiles[0] : rootfiles)?.['@_full-path'] ?? '');
+  const packageText = await zip.file(packagePath)?.async('text');
+  if (!packageText) throw new Error('EPUB 缺少 OPF 文件');
+  const opf = parser.parse(packageText)?.package;
+  const items = asArray<any>(opf?.manifest?.item); const refs = asArray<any>(opf?.spine?.itemref);
+  const manifest = new Map(items.map(item => [item['@_id'], item['@_href']]));
+  const basePath = packagePath.includes('/') ? packagePath.slice(0, packagePath.lastIndexOf('/') + 1) : '';
+  const pages: { index: number; imageUri: string }[] = [];
+  for (const ref of refs) {
+    const href = manifest.get(ref?.['@_idref']); if (!href) continue;
+    const chapterPath = normalizePath(basePath + href);
+    const chapter = await zip.file(chapterPath)?.async('text'); if (!chapter) continue;
+    const source = chapter.match(/<(?:img|image)[^>]+(?:src|href)=[\"']([^\"']+)[\"']/i)?.[1]; if (!source) continue;
+    const imagePath = normalizePath((chapterPath.includes('/') ? chapterPath.slice(0, chapterPath.lastIndexOf('/') + 1) : '') + decodeURIComponent(source.split('#')[0]!));
+    if (zip.file(imagePath)) pages.push({ index: pages.length, imageUri: ENTRY_PREFIX + encodeURIComponent(imagePath) });
+  }
+  if (!pages.length) throw new Error('EPUB 中没有找到漫画页面');
+  const metadata = opf?.metadata ?? {};
+  const creators = asArray<any>(metadata.creator).map(item => textValue(item)).filter(Boolean);
+  const writingMode = String(asArray<any>(metadata.meta).find(meta => meta?.['@_name'] === 'primary-writing-mode')?.['@_content'] ?? '');
+  return { title: textValue(metadata.title), author: [...new Set(creators)].join('、'), direction: writingMode.endsWith('-rl') ? 'rtl' : 'ltr', pages };
+}
+
+async function extractEpubEntryWithJsZip(sourceUri: string, entry: string, targetUri: string) {
+  const base64 = await FileSystem.readAsStringAsync(sourceUri, { encoding: FileSystem.EncodingType.Base64 });
+  const zip = await JSZip.loadAsync(base64, { base64: true });
+  const page = zip.file(entry);
+  if (!page) throw new Error('EPUB 页面不存在');
+  await FileSystem.writeAsStringAsync(targetUri, await page.async('base64'), { encoding: FileSystem.EncodingType.Base64 });
+}
+
+function asArray<T>(value: T | T[] | undefined): T[] { return value === undefined ? [] : Array.isArray(value) ? value : [value]; }
+function textValue(value: unknown): string {
+  const first = Array.isArray(value) ? value[0] : value;
+  if (typeof first === 'string') return first.trim();
+  if (first && typeof first === 'object' && '#text' in first) return String((first as any)['#text']).trim();
+  return '';
+}
 
 export function ensureEpubExtracted(sourceUri: string) {
   let cached = extractionCache.get(sourceUri);

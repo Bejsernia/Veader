@@ -2,7 +2,7 @@ import * as FileSystem from 'expo-file-system';
 import JSZip from 'jszip';
 import { XMLParser } from 'fast-xml-parser';
 import type { StoredBook } from './library';
-import { ensureEpubExtracted, normalizePath, resolveEpubUri } from './epub-native';
+import { epubEntryFromUri, ensureEpubExtracted, extractEpubPage, isEpubEntryUri, normalizePath, resolveEpubUri, scanEpub } from './epub-native';
 
 export type RenderableContent =
   | { kind: 'html'; html: string }
@@ -19,11 +19,18 @@ export async function loadEpubComic(book: StoredBook): Promise<EpubComic> {
   return cached;
 }
 
-export async function loadEpubPage(book: StoredBook, page: EpubComicPage) {
-  return page.imageUri;
+export async function loadEpubPage(book: StoredBook, page: EpubComicPage, sessionId?: string) {
+  if (!isEpubEntryUri(page.imageUri)) return page.imageUri;
+  const uri = await extractEpubPage(book.localUri, epubEntryFromUri(page.imageUri), sessionId || 'default');
+  page.imageUri = uri;
+  return uri;
 }
 
 async function parseEpubComic(book: StoredBook): Promise<EpubComic> {
+  try {
+    const scanned = await scanEpub(book.localUri);
+    return { title: scanned.title || book.title, author: scanned.author || book.author, direction: scanned.direction, pages: scanned.pages };
+  } catch { /* Fall back to the legacy extractor for unsupported EPUB containers. */ }
   const extracted = await ensureEpubExtracted(book.localUri);
   const { opf, packagePath, rootUri } = extracted;
   const manifestItems = asArray<any>(opf?.manifest?.item);

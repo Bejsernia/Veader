@@ -3,7 +3,7 @@ import * as FileSystem from 'expo-file-system';
 import * as SQLite from 'expo-sqlite';
 import { NativeModules } from 'react-native';
 import { XMLParser } from 'fast-xml-parser';
-import { ensureEpubExtracted } from './epub-native';
+import { epubEntryFromUri, extractEpubPage, scanEpub } from './epub-native';
 
 export type BookFormat = 'epub' | 'mobi' | 'pdf';
 
@@ -103,7 +103,7 @@ export async function listSeries(): Promise<LibrarySeries[]> {
     if (row.author) continue;
     const firstChapter = await db.getFirstAsync<any>('SELECT local_uri, original_name, format FROM chapters WHERE series_id = ? ORDER BY chapter_number, original_name LIMIT 1', row.id);
     if (!firstChapter) continue;
-    const metadata = await extractMetadata(firstChapter.local_uri, firstChapter.original_name, firstChapter.format as BookFormat);
+    const metadata = await scanSeriesMetadata(firstChapter.local_uri, firstChapter.original_name, firstChapter.format as BookFormat);
     if (metadata.author) {
       row.author = metadata.author;
       await db.runAsync('UPDATE series SET author = ? WHERE id = ?', metadata.author, row.id);
@@ -111,6 +111,14 @@ export async function listSeries(): Promise<LibrarySeries[]> {
   }
   return rows.map(row => ({ id: row.id, title: row.title, author: row.author, sourceUri: row.source_uri, coverUri: row.cover_uri, currentChapterTitle: row.current_chapter_title, currentChapterNumber: row.current_chapter_number,
     progress: row.progress, currentChapterId: row.current_chapter_id, chapterCount: row.chapter_count, updatedAt: row.updated_at }));
+}
+
+async function scanSeriesMetadata(uri: string, filename: string, format: BookFormat) {
+  const fallback = { title: filename.replace(/\.(epub|mobi|pdf)$/i, ''), author: '' };
+  if (format === 'epub') {
+    try { const scanned = await scanEpub(uri); return { title: scanned.title || fallback.title, author: scanned.author }; } catch { return fallback; }
+  }
+  return extractMetadata(uri, filename, format);
 }
 
 export async function listChapters(seriesId: number): Promise<StoredChapter[]> {
@@ -167,7 +175,7 @@ export async function configureLibraryRoot(): Promise<LibrarySeries[]> {
       let chapter: StoredChapter;
       try { chapter = await importChapter(candidate.uri, candidate.name, format, seriesId, chapterNumber++); } catch { continue; }
       if (!existing?.cover_uri && chapterNumber === 2 && format === 'epub') {
-        const firstPage = await epubFirstPageUri(chapter.localUri); if (firstPage) await setSeriesCover(seriesId, firstPage);
+        const firstPage = await epubFirstPageUri(chapter.localUri, seriesId); if (firstPage) await setSeriesCover(seriesId, firstPage);
       }
     }
     seriesCount++;
@@ -189,18 +197,12 @@ async function importChapter(uri: string, name: string, format: BookFormat, seri
 
 function displayName(uri: string) { return decodeURIComponent(uri).split('/').filter(Boolean).pop() ?? uri; }
 function cleanSeriesTitle(value: string) { return value.replace(/^\[[^\]]+\]\s*/, '').trim(); }
-async function epubFirstPageUri(uri: string): Promise<string | null> {
+async function epubFirstPageUri(uri: string, seriesId: number): Promise<string | null> {
   try {
-    const extracted = await ensureEpubExtracted(uri); const manifest = extracted.opf?.manifest?.item ?? []; const spine = extracted.opf?.spine?.itemref ?? [];
-    const items = Array.isArray(manifest) ? manifest : [manifest]; const refs = Array.isArray(spine) ? spine : [spine];
-    const first = items.find((item: any) => item['@_id'] === refs[0]?.['@_idref']); if (!first) return null;
-    const chapterPath = first['@_href']; const chapter = await FileSystem.readAsStringAsync(`${extracted.rootUri}${chapterPath}`);
-    const source = chapter.match(/<(?:img|image)[^>]+(?:src|href)=["']([^"']+)["']/i)?.[1];
-    if (!source) return null; const base = chapterPath.includes('/') ? chapterPath.slice(0, chapterPath.lastIndexOf('/') + 1) : '';
-    return `${extracted.rootUri}${normalizeEpubPath(base + source)}`;
+    const scanned = await scanEpub(uri); const page = scanned.pages[0]; if (!page) return null;
+    return extractEpubPage(uri, epubEntryFromUri(page.imageUri), `cover-${seriesId}`);
   } catch { return null; }
 }
-function normalizeEpubPath(value: string) { const parts: string[] = []; for (const part of value.replace(/\\/g, '/').split('/')) { if (!part || part === '.') continue; if (part === '..') parts.pop(); else parts.push(part); } return parts.join('/'); }
 
 export async function listSources(): Promise<StoredSource[]> {
   const db = await getDatabase();
@@ -337,9 +339,8 @@ async function extractMetadata(uri: string, filename: string, format: BookFormat
 }
 
 async function readEpubMetadata(uri: string, fallback: { title: string; author: string }) {
-  const opf = (await ensureEpubExtracted(uri)).opf;
-  const metadata = opf?.metadata ?? {};
-  return { title: textValue(metadata.title) || fallback.title, author: textValues(metadata.creator) || fallback.author };
+  const scanned = await scanEpub(uri);
+  return { title: scanned.title || fallback.title, author: scanned.author || fallback.author };
 }
 
 function textValue(value: unknown): string {
@@ -347,11 +348,6 @@ function textValue(value: unknown): string {
   if (typeof first === 'string') return first.trim();
   if (first && typeof first === 'object' && '#text' in first) return String((first as any)['#text']).trim();
   return '';
-}
-
-function textValues(value: unknown): string {
-  const values = Array.isArray(value) ? value : [value];
-  return values.map(item => textValue(item)).filter(Boolean).join('、');
 }
 
 function readMobiMetadata(bytes: Uint8Array, fallback: { title: string; author: string }) {
