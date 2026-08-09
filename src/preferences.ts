@@ -4,7 +4,6 @@ export type ThemeMode = 'light' | 'dark' | 'system';
 export type ReaderPreferences = {
   readingDirection?: 'ltr' | 'rtl' | 'vertical';
   tapZones?: boolean;
-  reverseTap?: boolean;
   smooth?: boolean;
   dark?: boolean;
   crop?: boolean;
