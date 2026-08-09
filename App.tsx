@@ -43,11 +43,15 @@ function SeriesProgress({ series, inverse = false, compact = false }: { series: 
   return <View style={styles.seriesProgress}><Text numberOfLines={1} style={[styles.progressCaption, inverse && styles.progressCaptionInverse]}>{chapterText}</Text><Progress value={chapterPosition} color="#0F9F91" /><Text style={[styles.progressCaption, inverse && styles.progressCaptionInverse]}>本章 {Math.round(series.progress * 100)}%</Text><Progress value={series.progress} color="#A855F7" /></View>;
 }
 
+function CompactProgress({ value, color }: { value: number; color: string }) {
+  return <View style={layoutStyles.compactProgressTrack}><View style={[layoutStyles.compactProgressFill, { width: `${Math.max(0, Math.min(1, value)) * 100}%`, backgroundColor: color }]} /></View>;
+}
+
 function CompactSeriesProgress({ series, inverse }: { series: LibrarySeries; inverse?: boolean }) {
   const chapterPosition = series.currentChapterNumber ? Math.min(1, Math.max(0, series.currentChapterNumber / Math.max(1, series.chapterCount))) : 0;
   const caption = { color: inverse ? '#E7E0FF' : '#77717D', fontSize: 10, lineHeight: 14, fontWeight: '700' as const };
   const chapterText = series.currentChapterId ? `章节 ${series.currentChapterNumber || 1} / ${series.chapterCount}` : `章节 0 / ${series.chapterCount}`;
-  return <View style={layoutStyles.seriesProgressCompact}><Text numberOfLines={1} style={caption}>{chapterText}</Text><Progress value={chapterPosition} color="#0F9F91" /><Text style={caption}>本章 {Math.round(series.progress * 100)}%</Text><Progress value={series.progress} color="#A855F7" /></View>;
+  return <View style={layoutStyles.seriesProgressCompact}><Text numberOfLines={1} style={caption}>{chapterText}</Text><CompactProgress value={chapterPosition} color="#0F9F91" /><Text style={caption}>本章 {Math.round(series.progress * 100)}%</Text><CompactProgress value={series.progress} color="#A855F7" /></View>;
 }
 
 function SeriesLibrary({ series, importing, configureRoot, refreshLibraries, openSeries, continueSeries, openSources }: { series: LibrarySeries[]; importing: boolean; configureRoot: () => void; refreshLibraries: () => void; openSeries: (value: LibrarySeries) => void; continueSeries: (value: LibrarySeries) => void; openSources: () => void }) {
@@ -252,10 +256,12 @@ const styles = StyleSheet.create({
 const layoutStyles = StyleSheet.create({
   continueTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   pillRight: { alignSelf: 'flex-end', marginBottom: 0 },
-  continueAuthor: { color: '#DDD6FF', fontSize: 12, lineHeight: 16 },
+  continueAuthor: { color: '#DDD6FF', fontSize: 12, lineHeight: 16, marginTop: 5 },
   continueBody: { height: 132, alignSelf: 'center', justifyContent: 'flex-start', paddingTop: 0 },
   continueTitleTop: { flex: 1, marginBottom: 0, marginRight: 8, lineHeight: 24 },
-  seriesProgressCompact: { gap: 3, marginTop: 3 },
+  seriesProgressCompact: { gap: 4, marginTop: 9, width: '100%' },
+  compactProgressTrack: { width: '100%', height: 5, borderRadius: 3, overflow: 'hidden', backgroundColor: '#E3E0E7' },
+  compactProgressFill: { height: '100%', borderRadius: 3 },
   bookTitleTight: { marginTop: 7, lineHeight: 19 },
   bookMetaTight: { marginTop: 2, marginBottom: 4, lineHeight: 15 },
   cacheLabel: { lineHeight: 20 },
