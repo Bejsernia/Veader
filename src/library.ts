@@ -190,7 +190,31 @@ export async function chooseSeriesCover(seriesId: number): Promise<string | null
 export async function configureLibraryRoot(): Promise<LibrarySeries[]> {
   await initializeLibrary();
   if (Platform.OS !== 'android') {
-    throw new Error('iOS 当前不支持直接授权文件夹源，请先使用文件导入；Android 文件夹源会保留系统授权路径。');
+    const picker = (NativeModules as any).VeaderFolderPicker;
+    if (!picker?.pickFolder) throw new Error('iOS 文件夹选择模块未安装，请使用文件导入或重新构建开发版');
+    const selection = await picker.pickFolder() as { directoryUri: string; files: { name: string; uri: string; path?: string; size?: number }[] } | null;
+    if (!selection?.directoryUri) return listSeries();
+    const grouped = new Map<string, { name: string; uri: string; size?: number }[]>();
+    for (const file of selection.files ?? []) {
+      const pathParts = (file.path ?? file.name).split('/').filter(Boolean); const seriesName = pathParts.length > 1 ? pathParts[0]! : displayName(selection.directoryUri);
+      const items = grouped.get(seriesName) ?? []; items.push(file); grouped.set(seriesName, items);
+    }
+    const db = await getDatabase(); const now = Date.now(); let seriesCount = 0;
+    for (const [seriesName, files] of grouped) {
+      const sourceUri = `${selection.directoryUri}#series=${encodeURIComponent(seriesName)}`;
+      const existing = await db.getFirstAsync<any>('SELECT id, cover_uri FROM series WHERE source_uri = ?', sourceUri);
+      const seriesId = existing ? Number(existing.id) : Number((await db.runAsync('INSERT INTO series(title, source_uri, created_at, updated_at) VALUES(?, ?, ?, ?)', cleanSeriesTitle(seriesName), sourceUri, now, now)).lastInsertRowId);
+      let chapterNumber = 1;
+      for (const file of files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))) {
+        const format = formatFromName(file.name); if (!format) continue;
+        await importChapter(file.uri, file.name, format, seriesId, chapterNumber++);
+      }
+      if (!existing?.cover_uri) { const first = await db.getFirstAsync<any>('SELECT local_uri, format FROM chapters WHERE series_id = ? ORDER BY chapter_number LIMIT 1', seriesId); if (first?.format === 'epub') { const cover = await epubFirstPageUri(first.local_uri, seriesId); if (cover) await setSeriesCover(seriesId, cover); } }
+      seriesCount++;
+    }
+    const sourceCount = await db.getFirstAsync<any>('SELECT COUNT(*) AS total FROM sources WHERE type = ?', 'local');
+    await saveSource('local', `漫画源${Number(sourceCount?.total ?? 0) + 1}`, selection.directoryUri, seriesCount);
+    return listSeries();
   }
   const scanner = (NativeModules as any).SafScanner;
   if (!scanner?.scan) throw new Error('Android 文件扫描模块未加载，请重新安装当前 APK。');
@@ -272,7 +296,47 @@ export async function refreshAllLibraries(): Promise<LibrarySeries[]> {
       await saveSource('local', source.name, source.endpoint, seriesCount);
     } catch (error) { console.warn('漫画源刷新失败', source.endpoint, error); }
   }
+  if (Platform.OS === 'android') {
+    const remote = (NativeModules as any).RemoteSource;
+    for (const source of sources.filter(item => (item.type === 'ftp' || item.type === 'smb') && item.enabled)) {
+      try {
+        if (!remote?.scan || !remote?.download) throw new Error('远程协议原生模块未安装');
+        const entries = await remote.scan(source.type, source.endpoint, undefined, undefined) as { name: string; path: string; size?: number; directory?: boolean }[];
+        const grouped = new Map<string, { name: string; path: string; size?: number }[]>();
+        for (const entry of entries) {
+          if (entry.directory || !formatFromName(entry.name)) continue;
+          const parts = entry.path.replace(/\\/g, '/').split('/').filter(Boolean);
+          const seriesName = parts.length > 1 ? parts[parts.length - 2]! : source.name;
+          const items = grouped.get(seriesName) ?? []; items.push(entry); grouped.set(seriesName, items);
+        }
+        const db = await getDatabase(); const now = Date.now(); const seenSeriesUris = new Set<string>(); let seriesCount = 0;
+        for (const [seriesName, items] of grouped) {
+          const sourceUri = `${source.endpoint}#series=${encodeURIComponent(seriesName)}`; seenSeriesUris.add(sourceUri);
+          const existing = await db.getFirstAsync<any>('SELECT id, cover_uri FROM series WHERE source_uri = ?', sourceUri);
+          const seriesId = existing ? Number(existing.id) : Number((await db.runAsync('INSERT INTO series(title, source_uri, created_at, updated_at) VALUES(?, ?, ?, ?)', cleanSeriesTitle(seriesName), sourceUri, now, now)).lastInsertRowId);
+          if (existing) await db.runAsync('UPDATE series SET title = ?, updated_at = ? WHERE id = ?', cleanSeriesTitle(seriesName), now, seriesId);
+          let chapterNumber = 1;
+          for (const entry of items.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))) {
+            const format = formatFromName(entry.name)!; const target = await remoteCacheTarget(source.id, entry.path, format);
+            const info = await FileSystem.getInfoAsync(target);
+            if (!info.exists) await remote.download(source.type, source.endpoint, entry.path, undefined, undefined, target);
+            await importChapter(target, entry.name, format, seriesId, chapterNumber++);
+          }
+          seriesCount++;
+          if (!existing?.cover_uri) { const first = await db.getFirstAsync<any>('SELECT local_uri FROM chapters WHERE series_id = ? ORDER BY chapter_number LIMIT 1', seriesId); if (first && formatFromName(first.local_uri) === 'epub') { const cover = await epubFirstPageUri(first.local_uri, seriesId); if (cover) await setSeriesCover(seriesId, cover); } }
+        }
+        const oldSeries = await db.getAllAsync<any>('SELECT id, source_uri FROM series');
+        for (const item of oldSeries) if (typeof item.source_uri === 'string' && item.source_uri.startsWith(`${source.endpoint}#series=`) && !seenSeriesUris.has(item.source_uri)) await db.runAsync('DELETE FROM series WHERE id = ?', item.id);
+        await saveSource(source.type, source.name, source.endpoint, seriesCount);
+      } catch (error) { console.warn('远程漫画源刷新失败', source.endpoint, error); }
+    }
+  }
   return listSeries();
+}
+
+async function remoteCacheTarget(sourceId: number, remotePath: string, format: BookFormat) {
+  const root = `${FileSystem.cacheDirectory}remote-books/`; await FileSystem.makeDirectoryAsync(root, { intermediates: true });
+  return `${root}${sourceId}-${encodeURIComponent(remotePath).replace(/%/g, '_')}.${format}`;
 }
 
 async function importChapter(uri: string, name: string, format: BookFormat, seriesId: number, chapterNumber: number): Promise<StoredChapter> {

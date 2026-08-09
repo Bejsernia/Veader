@@ -1,6 +1,7 @@
 import * as FileSystem from 'expo-file-system';
 import JSZip from 'jszip';
 import { XMLParser } from 'fast-xml-parser';
+import { NativeModules, Platform } from 'react-native';
 import type { StoredBook } from './library';
 import { epubEntryFromUri, ensureEpubExtracted, extractEpubPage, isEpubEntryUri, normalizePath, resolveEpubUri, scanEpub } from './epub-native';
 
@@ -10,6 +11,7 @@ export type RenderableContent =
 
 export type EpubComicPage = { index: number; imageUri: string };
 export type EpubComic = { title: string; author: string; direction: 'ltr' | 'rtl'; pages: EpubComicPage[] };
+export type PdfPage = { index: number; imageUri: string };
 
 const epubCache = new Map<string, Promise<EpubComic>>();
 const MAX_EPUB_CACHE_ENTRIES = 8;
@@ -37,6 +39,33 @@ export async function loadEpubPage(book: StoredBook, page: EpubComicPage, sessio
 
 export function clearEpubComicCache() {
   epubCache.clear();
+}
+
+export async function getPdfPageCount(uri: string) {
+  const native = (NativeModules as any).DocumentReader;
+  if (Platform.OS === 'android' && native?.getPdfInfo) {
+    const result = await native.getPdfInfo(uri);
+    return Math.max(0, Number(result?.pageCount ?? 0));
+  }
+  throw new Error('当前平台没有可用的 PDF 原生阅读器');
+}
+
+export async function renderPdfPage(uri: string, pageIndex: number, targetWidth: number) {
+  const native = (NativeModules as any).DocumentReader;
+  if (Platform.OS === 'android' && native?.renderPdfPage) {
+    return String(await native.renderPdfPage(uri, pageIndex, Math.round(targetWidth)));
+  }
+  throw new Error('当前平台没有可用的 PDF 原生阅读器');
+}
+
+export async function cropPageImage(uri: string) {
+  const native = (NativeModules as any).DocumentReader;
+  if (Platform.OS === 'android' && native?.cropImage) {
+    return String(await native.cropImage(uri));
+  }
+  // iOS uses the original URI until the native cropper is available; never
+  // duplicate the source file or silently pretend a crop was performed.
+  return uri;
 }
 
 async function parseEpubComic(book: StoredBook): Promise<EpubComic> {

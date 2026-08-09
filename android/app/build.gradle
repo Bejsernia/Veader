@@ -2,6 +2,10 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
+configurations.configureEach {
+    resolutionStrategy.force("org.bouncycastle:bcprov-jdk18on:1.76")
+}
+
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
 static def versionToNumber(major, minor, patch) {
@@ -193,6 +197,12 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+
+    // Real remote-folder clients used by the source scanner. They are kept in
+    // the native layer so credentials and protocol state never cross through
+    // a JavaScript polyfill.
+    implementation("commons-net:commons-net:3.10.0")
+    implementation("com.hierynomus:smbj:0.14.0")
 }
 
 if (rnVersion < versionToNumber(0, 75, 0)) {

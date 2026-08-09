@@ -74,25 +74,19 @@ export async function trimCacheToLimit(limitMb?: number) {
 }
 
 export async function clearAppCache() {
-  const pageRoot = FileSystem.cacheDirectory ? `${FileSystem.cacheDirectory}epub-pages/` : null;
-  if (!pageRoot) return;
-  let children: string[];
-  try { children = await FileSystem.readDirectoryAsync(pageRoot); } catch { return; }
-  await Promise.all(children.map(child => {
-    const name = child.split('/').filter(Boolean).pop() ?? child;
-    if (name.startsWith('cover-')) return Promise.resolve();
-    const uri = child.startsWith('file://') || child.startsWith('content://') ? child : `${pageRoot}${child}`;
-    return FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => undefined);
-  }));
+  if (!FileSystem.cacheDirectory) return;
+  const roots = ['pdf-pages', 'cropped-pages'];
+  await Promise.all(roots.map(root => FileSystem.deleteAsync(`${FileSystem.cacheDirectory}${root}/`, { idempotent: true }).catch(() => undefined)));
+  const epubRoot = `${FileSystem.cacheDirectory}epub-pages/`;
+  try {
+    const children = await FileSystem.readDirectoryAsync(epubRoot);
+    await Promise.all(children.filter(child => !child.split('/').filter(Boolean).pop()?.startsWith('cover-')).map(child => FileSystem.deleteAsync(child.startsWith('file://') ? child : `${epubRoot}${child}`, { idempotent: true }).catch(() => undefined)));
+  } catch { /* The page cache may not exist yet. */ }
 }
 
 async function listPageCacheFiles() {
   if (!FileSystem.cacheDirectory) return [] as CacheFile[];
-  const pageRoot = `${FileSystem.cacheDirectory}epub-pages/`;
-  const files = await listFiles(pageRoot);
-  return files.filter(file => {
-    const relative = file.uri.startsWith(pageRoot) ? file.uri.slice(pageRoot.length) : file.uri;
-    const firstSegment = relative.split('/').filter(Boolean)[0] ?? '';
-    return Boolean(firstSegment) && !firstSegment.startsWith('cover-');
-  });
+  const roots = ['epub-pages', 'pdf-pages', 'cropped-pages'];
+  const files = (await Promise.all(roots.map(root => listFiles(`${FileSystem.cacheDirectory}${root}/`)))).flat();
+  return files.filter(file => !file.uri.includes('/cover-'));
 }

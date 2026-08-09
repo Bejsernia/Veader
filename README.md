@@ -10,15 +10,16 @@ Veader 是一个面向 Android / iOS 的本地优先漫画阅读器，目前处�
 - 使用持久化 SQLite 保存漫画源、系列、章节、阅读位置和封面设置。
 - 以源文件 URI 作为权威数据；EPUB 只在打开时解压到缓存目录，不复制整套漫画到应用私有库。
 - 书架、最近阅读、系列目录、开始阅读 / 继续阅读和真实阅读进度。
-- EPUB 漫画分页阅读、点击区域翻页、左右阅读方向、阅读背景切换、进度拖动、音量键翻页和章节目录入口。
+- EPUB 漫画分页阅读、点击区域翻页、左右/从上到下阅读方向、单页/双页/拆分双页、奇偶页顺序、阅读背景切换、自动白边裁切、进度拖动、音量键翻页和章节目录入口。
+- Android 使用 `PdfRenderer` 在应用内逐页渲染 PDF；MOBI 使用本地 PalmDOC 解析器生成可分页阅读内容，不把原文件整体复制到应用库。
+- Android 的 FTP / SMB2/3 漫画源可以真实扫描和按需下载；账号密码由 Android Keystore 加密保存，不写入 SQLite。
 - Android 原生 SAF 扫描器，用于处理 Android 14 下的嵌套目录。
 
 以下部分仍属于开发中：
 
-- PDF 依赖系统或外部 PDF 查看器；MOBI 目前完成文件识别和基础解析，复杂排版仍需继续完善。
-- SMB / FTP 已保留真实配置入口，但原生协议客户端尚未接入，不会伪造扫描结果。
-- iOS 的文件访问和原生构建需要在 macOS / Xcode 环境中继续适配。
-- 阅读器已支持从左到右、从右到左、从上到下、单页/双页、奇偶页顺序、音量键翻页、黑白背景和刘海区域显示；拆分双页与自动白边分析仍需逐项完成端到端验证。
+- iOS 已加入系统文件夹选择桥接，仍需在 macOS / Xcode 上做安全作用域书签和 PDF 原生渲染的端到端验证；当前 iOS PDF 会回退到 WebView。
+- 自动白边裁切和 PDF 原生渲染目前是 Android 原生实现，iOS 会保留原图或使用系统回退路径。
+- SMB / FTP 远程源的 Android 刷新会把远程文件按需下载到受上限管理的远程缓存；原始文件不会被移动或重命名。
 
 ## 开发环境
 
@@ -66,8 +67,9 @@ App.tsx                         主导航、书架、漫画源、目录和阅读
 src/library.ts                  SQLite 数据库、漫画源扫描和进度持久化
 src/content.ts                  EPUB / PDF / MOBI 内容解析入口
 src/epub-native.ts              EPUB 临时缓存与解压
-src/protocols.ts                SMB / FTP 协议接口占位
-android/app/src/main/java/...   SAF 扫描器和音量键原生模块
+src/protocols.ts                SMB / FTP 原生适配器接口
+modules/veader-folder-picker/   iOS 系统文件夹选择桥接
+android/app/src/main/java/...   SAF、PDF/裁切、FTP/SMB 和音量键原生模块
 scripts/                        启动与 Android 构建脚本
 ```
 
