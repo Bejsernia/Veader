@@ -186,6 +186,37 @@ export async function configureLibraryRoot(): Promise<LibrarySeries[]> {
   return listSeries();
 }
 
+export async function refreshAllLibraries(): Promise<LibrarySeries[]> {
+  await initializeLibrary();
+  const sources = await listSources();
+  for (const source of sources.filter(item => item.type === 'local' && item.enabled)) {
+    try {
+      const nativeSeries = await NativeModules.SafScanner.scan(source.endpoint) as { name: string; uri: string; chapters: { name: string; uri: string }[] }[];
+      const db = await getDatabase(); const now = Date.now(); let seriesCount = 0;
+      for (const native of nativeSeries) {
+        if (!native.chapters.length) continue;
+        const existing = await db.getFirstAsync<any>('SELECT id, cover_uri FROM series WHERE source_uri = ?', native.uri);
+        let seriesId: number;
+        if (existing) { seriesId = existing.id; await db.runAsync('UPDATE series SET title = ?, updated_at = ? WHERE id = ?', cleanSeriesTitle(native.name), now, seriesId); }
+        else { const created = await db.runAsync('INSERT INTO series(title, source_uri, created_at, updated_at) VALUES(?, ?, ?, ?)', cleanSeriesTitle(native.name), now, now); seriesId = Number(created.lastInsertRowId); }
+        let chapterNumber = 1;
+        for (const candidate of native.chapters.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))) {
+          const format = formatFromName(candidate.name);
+          if (!format) continue;
+          let chapter: StoredChapter;
+          try { chapter = await importChapter(candidate.uri, candidate.name, format, seriesId, chapterNumber++); } catch { continue; }
+          if (!existing?.cover_uri && chapterNumber === 2 && format === 'epub') {
+            const firstPage = await epubFirstPageUri(chapter.localUri, seriesId); if (firstPage) await setSeriesCover(seriesId, firstPage);
+          }
+        }
+        seriesCount++;
+      }
+      await saveSource('local', source.name, source.endpoint, seriesCount);
+    } catch (error) { console.warn('漫画源刷新失败', source.endpoint, error); }
+  }
+  return listSeries();
+}
+
 async function importChapter(uri: string, name: string, format: BookFormat, seriesId: number, chapterNumber: number): Promise<StoredChapter> {
   const db = await getDatabase(); const existing = await db.getFirstAsync<any>('SELECT * FROM chapters WHERE original_name = ? AND series_id = ?', name, seriesId);
   if (existing) return (await listChapters(seriesId)).find(chapter => chapter.id === existing.id)!;
