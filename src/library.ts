@@ -99,6 +99,16 @@ export async function listSeries(): Promise<LibrarySeries[]> {
     (SELECT chapter_title FROM chapters current_chapter WHERE current_chapter.id = s.current_chapter_id) AS current_chapter_title,
     (SELECT chapter_number FROM chapters current_chapter WHERE current_chapter.id = s.current_chapter_id) AS current_chapter_number
     FROM series s LEFT JOIN chapters c ON c.series_id = s.id GROUP BY s.id ORDER BY s.updated_at DESC`);
+  for (const row of rows) {
+    if (row.author) continue;
+    const firstChapter = await db.getFirstAsync<any>('SELECT local_uri, original_name, format FROM chapters WHERE series_id = ? ORDER BY chapter_number, original_name LIMIT 1', row.id);
+    if (!firstChapter) continue;
+    const metadata = await extractMetadata(firstChapter.local_uri, firstChapter.original_name, firstChapter.format as BookFormat);
+    if (metadata.author) {
+      row.author = metadata.author;
+      await db.runAsync('UPDATE series SET author = ? WHERE id = ?', metadata.author, row.id);
+    }
+  }
   return rows.map(row => ({ id: row.id, title: row.title, author: row.author, sourceUri: row.source_uri, coverUri: row.cover_uri, currentChapterTitle: row.current_chapter_title, currentChapterNumber: row.current_chapter_number,
     progress: row.progress, currentChapterId: row.current_chapter_id, chapterCount: row.chapter_count, updatedAt: row.updated_at }));
 }
@@ -329,7 +339,7 @@ async function extractMetadata(uri: string, filename: string, format: BookFormat
 async function readEpubMetadata(uri: string, fallback: { title: string; author: string }) {
   const opf = (await ensureEpubExtracted(uri)).opf;
   const metadata = opf?.metadata ?? {};
-  return { title: textValue(metadata.title) || fallback.title, author: textValue(metadata.creator) || fallback.author };
+  return { title: textValue(metadata.title) || fallback.title, author: textValues(metadata.creator) || fallback.author };
 }
 
 function textValue(value: unknown): string {
@@ -337,6 +347,11 @@ function textValue(value: unknown): string {
   if (typeof first === 'string') return first.trim();
   if (first && typeof first === 'object' && '#text' in first) return String((first as any)['#text']).trim();
   return '';
+}
+
+function textValues(value: unknown): string {
+  const values = Array.isArray(value) ? value : [value];
+  return values.map(item => textValue(item)).filter(Boolean).join('、');
 }
 
 function readMobiMetadata(bytes: Uint8Array, fallback: { title: string; author: string }) {
@@ -347,7 +362,20 @@ function readMobiMetadata(bytes: Uint8Array, fallback: { title: string; author: 
   const titleOffset = readU32(bytes, mobi + 84);
   const titleLength = readU32(bytes, mobi + 88);
   const title = decodeText(bytes.slice(record0 + titleOffset, record0 + titleOffset + titleLength)).replace(/\0/g, '').trim();
-  return { ...fallback, title: title || fallback.title };
+  let author = '';
+  const headerLength = readU32(bytes, mobi + 4);
+  const exth = mobi + headerLength;
+  if (ascii(bytes, exth, 4) === 'EXTH') {
+    const count = readU32(bytes, exth + 8);
+    let offset = exth + 12;
+    for (let index = 0; index < count && offset + 8 <= bytes.length; index++) {
+      const type = readU32(bytes, offset); const size = readU32(bytes, offset + 4);
+      if (size < 8 || offset + size > bytes.length) break;
+      if (type === 100) author = decodeText(bytes.slice(offset + 8, offset + size)).replace(/\0/g, '').trim();
+      offset += size;
+    }
+  }
+  return { title: title || fallback.title, author: author || fallback.author };
 }
 
 function readPdfMetadata(bytes: Uint8Array, fallback: { title: string; author: string }) {
