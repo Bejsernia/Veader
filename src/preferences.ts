@@ -9,7 +9,7 @@ export type ReaderPreferences = {
   crop?: boolean;
   notch?: boolean;
   volume?: boolean;
-  pageMode?: 'single' | 'double' | 'split';
+  pageMode?: 'single' | 'double';
   doubleOrder?: 'natural' | 'reverse';
 };
 type Preferences = { themeMode?: ThemeMode; reader?: ReaderPreferences };
