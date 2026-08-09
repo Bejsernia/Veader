@@ -82,7 +82,7 @@ export async function initializeLibrary() {
   try { await db.execAsync('ALTER TABLE sources ADD COLUMN book_count INTEGER NOT NULL DEFAULT 0'); } catch { /* Column already exists. */ }
 }
 
-export async function listSeries(): Promise<LibrarySeries[]> {
+export async function listSeries(options: { refreshMetadata?: boolean } = {}): Promise<LibrarySeries[]> {
   const db = await getDatabase();
   const rows = await db.getAllAsync<any>(`SELECT s.*, COUNT(c.id) AS chapter_count, GROUP_CONCAT(c.chapter_title, ' ') AS chapter_search,
     (SELECT chapter_title FROM chapters current_chapter WHERE current_chapter.id = s.current_chapter_id) AS current_chapter_title,
@@ -90,12 +90,14 @@ export async function listSeries(): Promise<LibrarySeries[]> {
     FROM series s LEFT JOIN chapters c ON c.series_id = s.id GROUP BY s.id ORDER BY s.updated_at DESC`);
   for (const row of rows) {
     await restoreSeriesCover(row, db);
-    const firstChapter = await db.getFirstAsync<any>('SELECT local_uri, original_name, format FROM chapters WHERE series_id = ? ORDER BY chapter_number, original_name LIMIT 1', row.id);
-    if (!firstChapter) continue;
-    const metadata = await scanSeriesMetadata(firstChapter.local_uri, firstChapter.original_name, firstChapter.format as BookFormat);
-    if (metadata.author !== String(row.author ?? '')) {
-      row.author = metadata.author;
-      await db.runAsync('UPDATE series SET author = ? WHERE id = ?', metadata.author, row.id);
+    if (options.refreshMetadata || !String(row.author ?? '').trim()) {
+      const firstChapter = await db.getFirstAsync<any>('SELECT local_uri, original_name, format FROM chapters WHERE series_id = ? ORDER BY chapter_number, original_name LIMIT 1', row.id);
+      if (!firstChapter) continue;
+      const metadata = await scanSeriesMetadata(firstChapter.local_uri, firstChapter.original_name, firstChapter.format as BookFormat);
+      if (metadata.author !== String(row.author ?? '')) {
+        row.author = metadata.author;
+        await db.runAsync('UPDATE series SET author = ? WHERE id = ?', metadata.author, row.id);
+      }
     }
   }
   return rows.map(row => ({ id: row.id, title: row.title, author: row.author, sourceUri: row.source_uri, coverUri: row.cover_uri, currentChapterTitle: row.current_chapter_title, currentChapterNumber: row.current_chapter_number,
@@ -161,6 +163,7 @@ async function persistCoverUri(seriesId: number, coverUri: string) {
 }
 
 async function restoreSeriesCover(row: any, db: SQLite.SQLiteDatabase) {
+  if (row.cover_uri && FileSystem.documentDirectory && String(row.cover_uri).startsWith(FileSystem.documentDirectory)) return;
   const first = await db.getFirstAsync<any>('SELECT local_uri, format FROM chapters WHERE series_id = ? ORDER BY chapter_number, original_name LIMIT 1', row.id);
   if (!first) return;
   if (row.cover_uri) {
@@ -223,7 +226,7 @@ async function syncIosFolderSelection(selection: FolderSelection, sourceName?: s
   const existingSource = await db.getFirstAsync<any>('SELECT name FROM sources WHERE type = ? AND endpoint = ?', 'local', selection.directoryUri);
   const sourceCount = await db.getFirstAsync<any>('SELECT COUNT(*) AS total FROM sources WHERE type = ?', 'local');
   await saveSource('local', sourceName || existingSource?.name || `漫画源${Number(sourceCount?.total || 0) + 1}`, selection.directoryUri, grouped.size);
-  return listSeries();
+  return listSeries({ refreshMetadata: true });
 }
 
 // The selected directory is the library root. Its direct children are series; files below each child are chapters.
@@ -268,7 +271,7 @@ export async function configureLibraryRoot(): Promise<LibrarySeries[]> {
   const existingSource = await db.getFirstAsync<any>('SELECT name FROM sources WHERE type = ? AND endpoint = ?', 'local', permission.directoryUri);
   const sourceCount = await db.getFirstAsync<any>('SELECT COUNT(*) AS total FROM sources WHERE type = ?', 'local');
   await saveSource('local', existingSource?.name || `漫画源${Number(sourceCount?.total || 0) + 1}`, permission.directoryUri, seriesCount);
-  return listSeries();
+  return listSeries({ refreshMetadata: true });
 }
 
 export async function refreshAllLibraries(): Promise<LibrarySeries[]> {
@@ -285,7 +288,7 @@ export async function refreshAllLibraries(): Promise<LibrarySeries[]> {
         console.warn('iOS 漫画源刷新失败', source.endpoint, error);
       }
     }
-    return listSeries();
+    return listSeries({ refreshMetadata: true });
   }
   const scanner = (NativeModules as any).SafScanner;
   if (!scanner?.scan) throw new Error('Android 文件扫描模块未加载，请重新安装当前 APK。');
@@ -373,7 +376,7 @@ export async function refreshAllLibraries(): Promise<LibrarySeries[]> {
       } catch (error) { console.warn('远程漫画源刷新失败', source.endpoint, error); }
     }
   }
-  return listSeries();
+  return listSeries({ refreshMetadata: true });
 }
 
 async function remoteCacheTarget(sourceId: number, remotePath: string, format: BookFormat) {
