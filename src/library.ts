@@ -1,7 +1,7 @@
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import * as SQLite from 'expo-sqlite';
-import { NativeModules } from 'react-native';
+import { NativeModules, Platform } from 'react-native';
 import { XMLParser } from 'fast-xml-parser';
 import { epubEntryFromUri, extractEpubPage, scanEpub } from './epub-native';
 
@@ -189,9 +189,14 @@ export async function chooseSeriesCover(seriesId: number): Promise<string | null
 // The selected directory is the library root. Its direct children are series; files below each child are chapters.
 export async function configureLibraryRoot(): Promise<LibrarySeries[]> {
   await initializeLibrary();
+  if (Platform.OS !== 'android') {
+    throw new Error('iOS 当前不支持直接授权文件夹源，请先使用文件导入；Android 文件夹源会保留系统授权路径。');
+  }
+  const scanner = (NativeModules as any).SafScanner;
+  if (!scanner?.scan) throw new Error('Android 文件扫描模块未加载，请重新安装当前 APK。');
   const permission = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
   if (!permission.granted) return [];
-  const nativeSeries = await NativeModules.SafScanner.scan(permission.directoryUri) as { name: string; uri: string; chapters: { name: string; uri: string }[] }[];
+  const nativeSeries = await scanner.scan(permission.directoryUri) as { name: string; uri: string; chapters: { name: string; uri: string }[] }[];
   const db = await getDatabase(); const now = Date.now(); let seriesCount = 0;
   for (const native of nativeSeries) {
     const child = native.uri; const folderName = native.name;
@@ -220,10 +225,13 @@ export async function configureLibraryRoot(): Promise<LibrarySeries[]> {
 
 export async function refreshAllLibraries(): Promise<LibrarySeries[]> {
   await initializeLibrary();
+  if (Platform.OS !== 'android') return listSeries();
+  const scanner = (NativeModules as any).SafScanner;
+  if (!scanner?.scan) throw new Error('Android 文件扫描模块未加载，请重新安装当前 APK。');
   const sources = await listSources();
   for (const source of sources.filter(item => item.type === 'local' && item.enabled)) {
     try {
-      const nativeSeries = await NativeModules.SafScanner.scan(source.endpoint) as { name: string; uri: string; chapters: { name: string; uri: string }[] }[];
+      const nativeSeries = await scanner.scan(source.endpoint) as { name: string; uri: string; chapters: { name: string; uri: string }[] }[];
       const db = await getDatabase(); const now = Date.now(); let seriesCount = 0;
       for (const native of nativeSeries) {
         if (!native.chapters.length) continue;
@@ -331,6 +339,9 @@ export async function pickAndImportBooks(): Promise<StoredBook[]> {
 
 export async function pickAndImportFolder(): Promise<StoredBook[]> {
   await initializeLibrary();
+  if (Platform.OS !== 'android') {
+    throw new Error('iOS 当前不支持直接授权文件夹源，请使用文件导入。');
+  }
   const permission = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
   if (!permission.granted) return [];
   const candidates = await scanDirectory(permission.directoryUri, 0);

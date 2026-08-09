@@ -12,18 +12,31 @@ export type EpubComicPage = { index: number; imageUri: string };
 export type EpubComic = { title: string; author: string; direction: 'ltr' | 'rtl'; pages: EpubComicPage[] };
 
 const epubCache = new Map<string, Promise<EpubComic>>();
+const MAX_EPUB_CACHE_ENTRIES = 8;
 
 export async function loadEpubComic(book: StoredBook): Promise<EpubComic> {
   let cached = epubCache.get(book.localUri);
-  if (!cached) { cached = parseEpubComic(book); epubCache.set(book.localUri, cached); }
+  if (!cached) {
+    cached = parseEpubComic(book);
+    epubCache.set(book.localUri, cached);
+    while (epubCache.size > MAX_EPUB_CACHE_ENTRIES) {
+      const oldest = epubCache.keys().next().value as string | undefined;
+      if (!oldest || oldest === book.localUri) break;
+      epubCache.delete(oldest);
+    }
+  }
   return cached;
 }
 
 export async function loadEpubPage(book: StoredBook, page: EpubComicPage, sessionId?: string) {
   if (!isEpubEntryUri(page.imageUri)) return page.imageUri;
-  const uri = await extractEpubPage(book.localUri, epubEntryFromUri(page.imageUri), sessionId || 'default');
-  page.imageUri = uri;
-  return uri;
+  // The scanned comic is shared by readers. Keep its entry URI immutable;
+  // resolved files are session-scoped and must not leak after cleanup.
+  return extractEpubPage(book.localUri, epubEntryFromUri(page.imageUri), sessionId || 'default');
+}
+
+export function clearEpubComicCache() {
+  epubCache.clear();
 }
 
 async function parseEpubComic(book: StoredBook): Promise<EpubComic> {

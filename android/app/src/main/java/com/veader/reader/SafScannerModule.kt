@@ -128,9 +128,13 @@ class SafScannerModule(context: ReactApplicationContext) : ReactContextBaseJavaM
       val href = manifest[idref] ?: return@forEach
       val chapterPath = resolvePath(basePath, href)
       val chapter = xmlEntries[chapterPath]?.toString(Charsets.UTF_8) ?: return@forEach
-      val source = Regex("""<(?:img|image)[^>]+(?:src|href)\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE).find(chapter)?.groupValues?.getOrNull(1) ?: return@forEach
-      val imagePath = resolvePath(chapterPath.substringBeforeLast('/', ""), source.substringBefore('#').substringBefore('?'))
-      if (imagePath in names) pages.add(imagePath)
+      val chapterDir = chapterPath.substringBeforeLast('/', "")
+      val imageRegex = Regex("""<(?:img|image)[^>]+(?:src|href)\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+      imageRegex.findAll(chapter).forEach { match ->
+        val source = match.groupValues.getOrNull(1) ?: return@forEach
+        val imagePath = resolvePath(chapterDir, source.substringBefore('#').substringBefore('?'))
+        if (imagePath in names) pages.add(imagePath)
+      }
     }
     if (pages.isEmpty()) throw Exception("EPUB 中没有找到漫画页面")
     val metadata = elements(opf, "metadata").firstOrNull()

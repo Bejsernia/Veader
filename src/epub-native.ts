@@ -26,6 +26,12 @@ type PendingPage = { queueKey: string; sourceUri: string; entry: string; session
 const pendingPages = new Map<string, PendingPage>();
 const pendingTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const activePages = new Map<string, Promise<string>>();
+const cancelledSessions = new Set<string>();
+
+export function clearEpubMetadataCache() {
+  scanCache.clear();
+  extractionCache.clear();
+}
 
 export function scanEpub(sourceUri: string) {
   let cached = scanCache.get(sourceUri);
@@ -37,9 +43,10 @@ export function scanEpub(sourceUri: string) {
 }
 
 export function extractEpubPage(sourceUri: string, entry: string, sessionId: string) {
+  if (cancelledSessions.has(sessionId)) return Promise.reject(new Error('Reader session closed'));
   const cacheRoot = FileSystem.cacheDirectory;
   if (!cacheRoot) throw new Error('应用缓存目录不可用');
-  const targetUri = pageTargetUri(cacheRoot, entry, sessionId);
+  const targetUri = pageTargetUri(cacheRoot, sourceUri, entry, sessionId);
   const active = activePages.get(targetUri);
   if (active) return active;
   const queueKey = sourceUri + '\n' + sessionId;
@@ -53,8 +60,8 @@ export function extractEpubPage(sourceUri: string, entry: string, sessionId: str
   return promise.finally(() => activePages.delete(targetUri));
 }
 
-function pageTargetUri(cacheRoot: string, entry: string, sessionId: string) {
-  const key = stableKey(entry);
+function pageTargetUri(cacheRoot: string, sourceUri: string, entry: string, sessionId: string) {
+  const key = stableKey(sourceUri + '\n' + entry);
   const extension = entry.split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'img';
   return cacheRoot + 'epub-pages/' + sessionId + '/' + key + '.' + extension;
 }
@@ -63,6 +70,8 @@ async function flushPageQueue(queueKey: string) {
   const requests = [...pendingPages.entries()].filter(([, request]) => request.queueKey === queueKey).map(([targetUri, request]) => { pendingPages.delete(targetUri); return request; });
   if (!requests.length) return;
   try {
+    const sessionId = requests[0]!.sessionId;
+    if (cancelledSessions.has(sessionId)) throw new Error('Reader session closed');
     const cacheRoot = FileSystem.cacheDirectory;
     if (!cacheRoot) throw new Error('cache directory unavailable');
     const targetDir = cacheRoot + 'epub-pages/' + requests[0]!.sessionId + '/';
@@ -72,6 +81,7 @@ async function flushPageQueue(queueKey: string) {
       if (!info.exists) missing.push(request);
     }
     if (missing.length) {
+      if (cancelledSessions.has(sessionId)) throw new Error('Reader session closed');
       await FileSystem.makeDirectoryAsync(targetDir, { intermediates: true });
       const scanner = (NativeModules as any).SafScanner;
       if (Platform.OS === 'android' && scanner?.extractEpubEntries) {
@@ -85,6 +95,10 @@ async function flushPageQueue(queueKey: string) {
         await extractEpubEntriesWithJsZip(missing[0]!.sourceUri, missing.map(item => item.entry), missing.map(item => item.targetUri));
       }
     }
+    if (cancelledSessions.has(sessionId)) {
+      await FileSystem.deleteAsync(targetDir, { idempotent: true });
+      throw new Error('Reader session closed');
+    }
     await trimCacheToLimit();
     for (const request of requests) {
       const info = await FileSystem.getInfoAsync(request.targetUri);
@@ -96,8 +110,21 @@ async function flushPageQueue(queueKey: string) {
   }
 }
 export async function clearEpubSession(sessionId: string) {
-  if (!FileSystem.cacheDirectory) return;
-  await FileSystem.deleteAsync(FileSystem.cacheDirectory + 'epub-pages/' + sessionId, { idempotent: true });
+  cancelledSessions.add(sessionId);
+  const sessionError = new Error('Reader session closed');
+  for (const [queueKey, timer] of pendingTimers) {
+    if (!queueKey.endsWith('\n' + sessionId)) continue;
+    clearTimeout(timer);
+    pendingTimers.delete(queueKey);
+  }
+  for (const [targetUri, request] of pendingPages) {
+    if (request.sessionId !== sessionId) continue;
+    pendingPages.delete(targetUri);
+    request.reject(sessionError);
+  }
+  if (FileSystem.cacheDirectory) {
+    await FileSystem.deleteAsync(FileSystem.cacheDirectory + 'epub-pages/' + sessionId, { idempotent: true });
+  }
 }
 
 export function isEpubEntryUri(value: string) {
@@ -142,9 +169,13 @@ async function scanEpubWithJsZip(sourceUri: string): Promise<ScannedEpub> {
     const href = manifest.get(ref?.['@_idref']); if (!href) continue;
     const chapterPath = normalizePath(basePath + href);
     const chapter = await zip.file(chapterPath)?.async('text'); if (!chapter) continue;
-    const source = chapter.match(/<(?:img|image)[^>]+(?:src|href)=[\"']([^\"']+)[\"']/i)?.[1]; if (!source) continue;
-    const imagePath = normalizePath((chapterPath.includes('/') ? chapterPath.slice(0, chapterPath.lastIndexOf('/') + 1) : '') + decodeURIComponent(source.split('#')[0]!));
-    if (zip.file(imagePath)) pages.push({ index: pages.length, imageUri: ENTRY_PREFIX + encodeURIComponent(imagePath) });
+    const chapterDir = chapterPath.includes('/') ? chapterPath.slice(0, chapterPath.lastIndexOf('/') + 1) : '';
+    for (const match of chapter.matchAll(/<(?:img|image)[^>]+(?:src|href)=[\"']([^\"']+)[\"']/gi)) {
+      const source = match[1];
+      if (!source) continue;
+      const imagePath = normalizePath(chapterDir + decodeURIComponent(source.split('#')[0]!));
+      if (zip.file(imagePath)) pages.push({ index: pages.length, imageUri: ENTRY_PREFIX + encodeURIComponent(imagePath) });
+    }
   }
   if (!pages.length) throw new Error('EPUB 中没有找到漫画页面');
   const metadata = opf?.metadata ?? {};
