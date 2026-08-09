@@ -24,6 +24,26 @@ public class VeaderFolderPickerModule: Module {
         controller.present(picker, animated: true)
       }
     }
+
+    AsyncFunction("refreshFolder") { (directoryUri: String, promise: Promise) in
+      guard let bookmark = UserDefaults.standard.data(forKey: "veader.folder.bookmark.\(directoryUri)") else {
+        promise.resolve(nil)
+        return
+      }
+      do {
+        var stale = false
+        let folder = try URL(resolvingBookmarkData: bookmark, options: [.withoutUI, .withoutMounting], relativeTo: nil, bookmarkDataIsStale: &stale)
+        let accessed = folder.startAccessingSecurityScopedResource()
+        let result = enumerateFolder(folder)
+        if accessed { activeSecurityScopedFolders.append(folder) }
+        if stale, let refreshed = try? folder.bookmarkData(options: .suitableForBookmarkFile, includingResourceValuesForKeys: nil, relativeTo: nil) {
+          UserDefaults.standard.set(refreshed, forKey: "veader.folder.bookmark.\(directoryUri)")
+        }
+        promise.resolve(result)
+      } catch {
+        promise.reject("FOLDER_REFRESH_FAILED", error.localizedDescription, error)
+      }
+    }
   }
 
   private func topViewController() -> UIViewController? {
@@ -43,6 +63,9 @@ private final class FolderPickerDelegate: NSObject, UIDocumentPickerDelegate {
   func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
     guard let folder = urls.first else { completion(nil); return }
     let accessed = folder.startAccessingSecurityScopedResource()
+    if let bookmark = try? folder.bookmarkData(options: .suitableForBookmarkFile, includingResourceValuesForKeys: nil, relativeTo: nil) {
+      UserDefaults.standard.set(bookmark, forKey: "veader.folder.bookmark.\(folder.absoluteString)")
+    }
     var files: [[String: Any]] = []
     if let enumerator = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey], options: [.skipsHiddenFiles]) {
       for case let file as URL in enumerator {
@@ -57,4 +80,17 @@ private final class FolderPickerDelegate: NSObject, UIDocumentPickerDelegate {
   }
 
   func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { completion(nil) }
+}
+
+private func enumerateFolder(_ folder: URL) -> [String: Any] {
+  var files: [[String: Any]] = []
+  if let enumerator = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey], options: [.skipsHiddenFiles]) {
+    for case let file as URL in enumerator {
+      let values = try? file.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey])
+      guard values?.isDirectory != true, ["epub", "mobi", "pdf"].contains(file.pathExtension.lowercased()) else { continue }
+      let relativePath = file.path.replacingOccurrences(of: folder.path + "/", with: "")
+      files.append(["name": file.lastPathComponent, "path": relativePath, "uri": file.absoluteString, "size": values?.fileSize ?? 0])
+    }
+  }
+  return ["directoryUri": folder.absoluteString, "files": files]
 }

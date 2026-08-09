@@ -3,7 +3,7 @@ import JSZip from 'jszip';
 import { XMLParser } from 'fast-xml-parser';
 import { NativeModules, Platform } from 'react-native';
 import type { StoredBook } from './library';
-import { epubEntryFromUri, ensureEpubExtracted, extractEpubPage, isEpubEntryUri, normalizePath, resolveEpubUri, scanEpub } from './epub-native';
+import { epubEntryFromUri, extractEpubPage, isEpubEntryUri, normalizePath, scanEpub } from './epub-native';
 
 export type RenderableContent =
   | { kind: 'html'; html: string }
@@ -13,21 +13,11 @@ export type EpubComicPage = { index: number; imageUri: string };
 export type EpubComic = { title: string; author: string; direction: 'ltr' | 'rtl'; pages: EpubComicPage[] };
 export type PdfPage = { index: number; imageUri: string };
 
-const epubCache = new Map<string, Promise<EpubComic>>();
-const MAX_EPUB_CACHE_ENTRIES = 8;
-
 export async function loadEpubComic(book: StoredBook): Promise<EpubComic> {
-  let cached = epubCache.get(book.localUri);
-  if (!cached) {
-    cached = parseEpubComic(book);
-    epubCache.set(book.localUri, cached);
-    while (epubCache.size > MAX_EPUB_CACHE_ENTRIES) {
-      const oldest = epubCache.keys().next().value as string | undefined;
-      if (!oldest || oldest === book.localUri) break;
-      epubCache.delete(oldest);
-    }
-  }
-  return cached;
+  // Metadata caching and source invalidation are centralized in scanEpub.
+  // Do not retain a second module-level Promise cache here: it could outlive
+  // a replaced source archive and reintroduce stale page tables.
+  return parseEpubComic(book);
 }
 
 export async function loadEpubPage(book: StoredBook, page: EpubComicPage, sessionId?: string) {
@@ -38,7 +28,7 @@ export async function loadEpubPage(book: StoredBook, page: EpubComicPage, sessio
 }
 
 export function clearEpubComicCache() {
-  epubCache.clear();
+  // Kept for callers from older builds; scanEpub owns the bounded cache now.
 }
 
 export async function getPdfPageCount(uri: string) {
@@ -75,31 +65,6 @@ async function parseEpubComic(book: StoredBook): Promise<EpubComic> {
   } catch (reason) {
     throw reason instanceof Error ? reason : new Error(String(reason));
   }
-  const extracted = await ensureEpubExtracted(book.localUri);
-  const { opf, packagePath, rootUri } = extracted;
-  const manifestItems = asArray<any>(opf?.manifest?.item);
-  const spineItems = asArray<any>(opf?.spine?.itemref);
-  const manifest = new Map(manifestItems.map(item => [item['@_id'], item]));
-  const basePath = packagePath.includes('/') ? packagePath.slice(0, packagePath.lastIndexOf('/') + 1) : '';
-  const pages: EpubComicPage[] = [];
-  for (const itemref of spineItems) {
-    const item = manifest.get(itemref?.['@_idref']);
-    if (!item?.['@_href']) continue;
-    const chapterPath = normalizePath(basePath + item['@_href']);
-    const chapterInfo = await FileSystem.getInfoAsync(`${rootUri}${chapterPath}`);
-    if (!chapterInfo.exists) continue;
-    const chapter = await FileSystem.readAsStringAsync(`${rootUri}${chapterPath}`);
-    const source = chapter.match(/<(?:img|image)[^>]+(?:src|href)=["']([^"']+)["']/i)?.[1];
-    if (!source) continue;
-    const imageUri = resolveEpubUri(rootUri, chapterPath, source!);
-    const imageInfo = await FileSystem.getInfoAsync(imageUri);
-    if (!imageInfo.exists) continue;
-    pages.push({ index: pages.length, imageUri });
-  }
-  if (!pages.length) throw new Error('这个 EPUB 的 spine 中没有找到漫画页面');
-  const metadata = opf?.metadata ?? {};
-  const writingMode = String(asArray<any>(metadata.meta).find(meta => meta?.['@_name'] === 'primary-writing-mode')?.['@_content'] ?? '');
-  return { title: textValue(metadata.title) || book.title, author: textValue(metadata.creator) || book.author, direction: writingMode.endsWith('-rl') ? 'rtl' : 'ltr', pages };
 }
 
 export async function loadRenderableContent(book: StoredBook): Promise<RenderableContent> {
@@ -196,7 +161,6 @@ function htmlDocument(title: string, body: string) {
 }
 
 function asArray<T>(value: T | T[] | undefined): T[] { return value === undefined ? [] : Array.isArray(value) ? value : [value]; }
-function textValue(value: unknown): string { const first = Array.isArray(value) ? value[0] : value; if (typeof first === 'string') return first.trim(); if (first && typeof first === 'object' && '#text' in first) return String((first as any)['#text']).trim(); return ''; }
 function readU16(bytes: Uint8Array, offset: number) { return (((bytes[offset] ?? 0) << 8) | (bytes[offset + 1] ?? 0)) >>> 0; }
 function readU32(bytes: Uint8Array, offset: number) { return (((bytes[offset] ?? 0) << 24) | ((bytes[offset + 1] ?? 0) << 16) | ((bytes[offset + 2] ?? 0) << 8) | (bytes[offset + 3] ?? 0)) >>> 0; }
 function concat(chunks: Uint8Array[]) { const length = chunks.reduce((sum, value) => sum + value.length, 0); const result = new Uint8Array(length); let offset = 0; for (const chunk of chunks) { result.set(chunk, offset); offset += chunk.length; } return result; }

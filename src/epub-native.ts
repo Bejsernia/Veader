@@ -1,16 +1,8 @@
 import * as FileSystem from 'expo-file-system';
-import { unzip } from 'react-native-zip-archive';
 import { XMLParser } from 'fast-xml-parser';
 import JSZip from 'jszip';
 import { NativeModules, Platform } from 'react-native';
 import { trimCacheToLimit } from './cache';
-
-export type ExtractedEpub = {
-  rootUri: string;
-  packagePath: string;
-  packageUri: string;
-  opf: any;
-};
 
 export type ScannedEpub = {
   title: string;
@@ -19,34 +11,73 @@ export type ScannedEpub = {
   pages: { index: number; imageUri: string }[];
 };
 
-const extractionCache = new Map<string, Promise<ExtractedEpub>>();
-const scanCache = new Map<string, Promise<ScannedEpub>>();
+type ScanCacheEntry = { fingerprint: string; value: Promise<ScannedEpub> };
+const scanCache = new Map<string, ScanCacheEntry>();
+const fingerprintCache = new Map<string, { value: string; checkedAt: number }>();
+const MAX_SCAN_CACHE_ENTRIES = 32;
 const ENTRY_PREFIX = 'epub-entry://';
 type PendingPage = { queueKey: string; sourceUri: string; entry: string; sessionId: string; targetUri: string; fileName: string; resolve: (value: string) => void; reject: (reason: unknown) => void };
 const pendingPages = new Map<string, PendingPage>();
 const pendingTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const activePages = new Map<string, Promise<string>>();
+const sessionPageUris = new Map<string, Map<string, string>>();
 const cancelledSessions = new Set<string>();
 
 export function clearEpubMetadataCache() {
   scanCache.clear();
-  extractionCache.clear();
+  fingerprintCache.clear();
 }
 
-export function scanEpub(sourceUri: string) {
-  let cached = scanCache.get(sourceUri);
-  if (!cached) {
-    cached = scanEpubSource(sourceUri);
+export async function scanEpub(sourceUri: string): Promise<ScannedEpub> {
+  const fingerprint = await sourceFingerprint(sourceUri);
+  const cached = scanCache.get(sourceUri);
+  if (cached?.fingerprint === fingerprint) {
+    scanCache.delete(sourceUri);
     scanCache.set(sourceUri, cached);
+    return cached.value;
   }
-  return cached;
+  const value = scanEpubSource(sourceUri);
+  scanCache.set(sourceUri, { fingerprint, value });
+  while (scanCache.size > MAX_SCAN_CACHE_ENTRIES) scanCache.delete(scanCache.keys().next().value as string);
+  try {
+    return await value;
+  } catch (error) {
+    const current = scanCache.get(sourceUri);
+    if (current?.value === value) scanCache.delete(sourceUri);
+    throw error;
+  }
 }
 
-export function extractEpubPage(sourceUri: string, entry: string, sessionId: string) {
+async function sourceFingerprint(sourceUri: string) {
+  const cached = fingerprintCache.get(sourceUri);
+  if (cached && Date.now() - cached.checkedAt < 2000) return cached.value;
+  let value = 'unknown';
+  try {
+    const info = await FileSystem.getInfoAsync(sourceUri, { size: true });
+    value = !info.exists ? 'missing' : `${(info as any).modificationTime ?? 0}:${(info as any).size ?? 0}`;
+  } catch {
+    value = 'unknown';
+  }
+  fingerprintCache.set(sourceUri, { value, checkedAt: Date.now() });
+  while (fingerprintCache.size > MAX_SCAN_CACHE_ENTRIES) fingerprintCache.delete(fingerprintCache.keys().next().value as string);
+  return value;
+}
+
+export async function extractEpubPage(sourceUri: string, entry: string, sessionId: string) {
   if (cancelledSessions.has(sessionId)) return Promise.reject(new Error('Reader session closed'));
   const cacheRoot = FileSystem.cacheDirectory;
   if (!cacheRoot) throw new Error('应用缓存目录不可用');
-  const targetUri = pageTargetUri(cacheRoot, sourceUri, entry, sessionId);
+  const fingerprint = await sourceFingerprint(sourceUri);
+  if (cancelledSessions.has(sessionId)) throw new Error('Reader session closed');
+  const targetUri = pageTargetUri(cacheRoot, sourceUri, entry, sessionId, fingerprint);
+  const sessionPages = sessionPageUris.get(sessionId) ?? new Map<string, string>();
+  sessionPageUris.set(sessionId, sessionPages);
+  const mappedUri = sessionPages.get(entry);
+  if (mappedUri === targetUri) {
+    const mappedInfo = await FileSystem.getInfoAsync(mappedUri);
+    if (mappedInfo.exists) return mappedUri;
+    sessionPages.delete(entry);
+  } else if (mappedUri) sessionPages.delete(entry);
   const active = activePages.get(targetUri);
   if (active) return active;
   const queueKey = sourceUri + '\n' + sessionId;
@@ -57,11 +88,12 @@ export function extractEpubPage(sourceUri: string, entry: string, sessionId: str
     }
   });
   activePages.set(targetUri, promise);
+  sessionPages.set(entry, targetUri);
   return promise.finally(() => activePages.delete(targetUri));
 }
 
-function pageTargetUri(cacheRoot: string, sourceUri: string, entry: string, sessionId: string) {
-  const key = stableKey(sourceUri + '\n' + entry);
+function pageTargetUri(cacheRoot: string, sourceUri: string, entry: string, sessionId: string, fingerprint: string) {
+  const key = stableKey(sourceUri + '\n' + fingerprint + '\n' + entry);
   const extension = entry.split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'img';
   return cacheRoot + 'epub-pages/' + sessionId + '/' + key + '.' + extension;
 }
@@ -111,6 +143,7 @@ async function flushPageQueue(queueKey: string) {
 }
 export async function clearEpubSession(sessionId: string) {
   cancelledSessions.add(sessionId);
+  sessionPageUris.delete(sessionId);
   const sessionError = new Error('Reader session closed');
   for (const [queueKey, timer] of pendingTimers) {
     if (!queueKey.endsWith('\n' + sessionId)) continue;
@@ -210,59 +243,13 @@ function textValue(value: unknown): string {
   return '';
 }
 
-export function ensureEpubExtracted(sourceUri: string) {
-  let cached = extractionCache.get(sourceUri);
-  if (!cached) {
-    cached = extractAndReadPackage(sourceUri);
-    extractionCache.set(sourceUri, cached);
+function stableKey(value: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index++) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
   }
-  return cached;
-}
-
-async function extractAndReadPackage(sourceUri: string): Promise<ExtractedEpub> {
-  const cacheRoot = FileSystem.cacheDirectory;
-  if (!cacheRoot) throw new Error('应用缓存目录不可用');
-  const key = stableKey(sourceUri);
-  const rootUri = `${cacheRoot}epub-extracted/${key}/`;
-  const markerUri = `${rootUri}META-INF/container.xml`;
-  const markerInfo = await FileSystem.getInfoAsync(markerUri);
-  if (!markerInfo.exists) {
-    await FileSystem.makeDirectoryAsync(rootUri, { intermediates: true });
-    try {
-      const localUri = await cacheSourceIfNeeded(sourceUri, key);
-      await unzip(nativePath(localUri), nativePath(rootUri), 'UTF-8');
-    } catch (error) {
-      await FileSystem.deleteAsync(rootUri, { idempotent: true });
-      throw error;
-    }
-  }
-  const containerText = await FileSystem.readAsStringAsync(markerUri);
-  const parser = new XMLParser({ ignoreAttributes: false, removeNSPrefix: true });
-  const rootfiles = parser.parse(containerText)?.container?.rootfiles?.rootfile;
-  const packagePath = (Array.isArray(rootfiles) ? rootfiles[0] : rootfiles)?.['@_full-path'];
-  if (!packagePath) throw new Error('EPUB container.xml 没有 rootfile');
-  const packageUri = `${rootUri}${normalizePath(packagePath)}`;
-  const packageText = await FileSystem.readAsStringAsync(packageUri);
-  return { rootUri, packagePath: normalizePath(packagePath), packageUri, opf: parser.parse(packageText)?.package };
-}
-
-// Network/SAF sources are copied only while a chapter is opened. The cache can be safely removed at any time.
-async function cacheSourceIfNeeded(sourceUri: string, key: string) {
-  if (sourceUri.startsWith('file://')) return sourceUri;
-  const cacheRoot = FileSystem.cacheDirectory;
-  if (!cacheRoot) throw new Error('应用缓存目录不可用');
-  const targetUri = `${cacheRoot}epub-source/${key}.epub`;
-  const info = await FileSystem.getInfoAsync(targetUri);
-  if (!info.exists) {
-    await FileSystem.makeDirectoryAsync(`${cacheRoot}epub-source/`, { intermediates: true });
-    await FileSystem.copyAsync({ from: sourceUri, to: targetUri });
-  }
-  return targetUri;
-}
-
-export function resolveEpubUri(rootUri: string, fromPath: string, relativePath: string) {
-  const directory = fromPath.includes('/') ? fromPath.slice(0, fromPath.lastIndexOf('/') + 1) : '';
-  return `${rootUri}${normalizePath(directory + decodeURIComponent(relativePath.split('#')[0]!))}`;
+  return `book-${(hash >>> 0).toString(16)}`;
 }
 
 export function normalizePath(path: string) {
@@ -272,17 +259,4 @@ export function normalizePath(path: string) {
     else if (part && part !== '.') parts.push(part);
   }
   return parts.join('/');
-}
-
-function nativePath(uri: string) {
-  return decodeURIComponent(uri.replace(/^file:\/\//, ''));
-}
-
-function stableKey(value: string) {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index++) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return `book-${(hash >>> 0).toString(16)}`;
 }

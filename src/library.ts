@@ -23,10 +23,14 @@ export type StoredBook = {
 };
 
 export type StoredSource = { id: number; type: 'local' | 'smb' | 'ftp'; name: string; endpoint: string; enabled: boolean; bookCount: number; createdAt: number };
-export type LibrarySeries = { id: number; title: string; author: string; sourceUri: string; coverUri: string | null; progress: number; currentChapterId: number | null; currentChapterTitle: string | null; currentChapterNumber: number | null; chapterCount: number; updatedAt: number };
+export type LibrarySeries = { id: number; title: string; author: string; sourceUri: string; coverUri: string | null; progress: number; currentChapterId: number | null; currentChapterTitle: string | null; currentChapterNumber: number | null; chapterSearchText: string; chapterCount: number; updatedAt: number };
 export type StoredChapter = StoredBook & { seriesId: number; chapterNumber: number; chapterTitle: string };
 
 let database: Promise<SQLite.SQLiteDatabase> | undefined;
+type SeriesMetadata = { title: string; author: string };
+type MetadataCacheEntry = { fingerprint: string; value: Promise<SeriesMetadata> };
+const metadataCache = new Map<string, MetadataCacheEntry>();
+const MAX_METADATA_CACHE_ENTRIES = 64;
 
 function getDatabase() {
   database ??= SQLite.openDatabaseAsync('veader.db');
@@ -38,21 +42,6 @@ export async function initializeLibrary() {
   await db.execAsync(`
     PRAGMA journal_mode = WAL;
     PRAGMA foreign_keys = ON;
-    CREATE TABLE IF NOT EXISTS books (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      title TEXT NOT NULL,
-      author TEXT NOT NULL DEFAULT '',
-      format TEXT NOT NULL CHECK(format IN ('epub','mobi','pdf')),
-      local_uri TEXT NOT NULL UNIQUE,
-      original_name TEXT NOT NULL,
-      file_size INTEGER NOT NULL DEFAULT 0,
-      cover_uri TEXT,
-      progress REAL NOT NULL DEFAULT 0,
-      current_location TEXT,
-      added_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_books_title ON books(title);
     CREATE TABLE IF NOT EXISTS series (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL,
@@ -95,31 +84,43 @@ export async function initializeLibrary() {
 
 export async function listSeries(): Promise<LibrarySeries[]> {
   const db = await getDatabase();
-  const rows = await db.getAllAsync<any>(`SELECT s.*, COUNT(c.id) AS chapter_count,
+  const rows = await db.getAllAsync<any>(`SELECT s.*, COUNT(c.id) AS chapter_count, GROUP_CONCAT(c.chapter_title, ' ') AS chapter_search,
     (SELECT chapter_title FROM chapters current_chapter WHERE current_chapter.id = s.current_chapter_id) AS current_chapter_title,
     (SELECT chapter_number FROM chapters current_chapter WHERE current_chapter.id = s.current_chapter_id) AS current_chapter_number
     FROM series s LEFT JOIN chapters c ON c.series_id = s.id GROUP BY s.id ORDER BY s.updated_at DESC`);
   for (const row of rows) {
     await restoreSeriesCover(row, db);
-    if (row.author) continue;
     const firstChapter = await db.getFirstAsync<any>('SELECT local_uri, original_name, format FROM chapters WHERE series_id = ? ORDER BY chapter_number, original_name LIMIT 1', row.id);
     if (!firstChapter) continue;
     const metadata = await scanSeriesMetadata(firstChapter.local_uri, firstChapter.original_name, firstChapter.format as BookFormat);
-    if (metadata.author) {
+    if (metadata.author !== String(row.author ?? '')) {
       row.author = metadata.author;
       await db.runAsync('UPDATE series SET author = ? WHERE id = ?', metadata.author, row.id);
     }
   }
   return rows.map(row => ({ id: row.id, title: row.title, author: row.author, sourceUri: row.source_uri, coverUri: row.cover_uri, currentChapterTitle: row.current_chapter_title, currentChapterNumber: row.current_chapter_number,
-    progress: row.progress, currentChapterId: row.current_chapter_id, chapterCount: row.chapter_count, updatedAt: row.updated_at }));
+    chapterSearchText: String(row.chapter_search ?? ''), progress: row.progress, currentChapterId: row.current_chapter_id, chapterCount: row.chapter_count, updatedAt: row.updated_at }));
 }
 
-async function scanSeriesMetadata(uri: string, filename: string, format: BookFormat) {
+async function scanSeriesMetadata(uri: string, filename: string, format: BookFormat): Promise<SeriesMetadata> {
   const fallback = { title: filename.replace(/\.(epub|mobi|pdf)$/i, ''), author: '' };
-  if (format === 'epub') {
-    try { const scanned = await scanEpub(uri); return { title: scanned.title || fallback.title, author: scanned.author }; } catch { return fallback; }
-  }
-  return extractMetadata(uri, filename, format);
+  let fingerprint = 'unknown';
+  try {
+    const info = await FileSystem.getInfoAsync(uri, { size: true });
+    fingerprint = info.exists ? `${(info as any).modificationTime ?? 0}:${(info as any).size ?? 0}` : 'missing';
+  } catch { /* Keep the unknown fingerprint and retry when the source becomes available. */ }
+  const key = `${format}:${uri}`;
+  const cached = metadataCache.get(key);
+  if (cached?.fingerprint === fingerprint) return cached.value;
+  const value = (async () => {
+    if (format === 'epub') {
+      try { const scanned = await scanEpub(uri); return { title: scanned.title || fallback.title, author: scanned.author }; } catch { return fallback; }
+    }
+    return extractMetadata(uri, filename, format);
+  })();
+  metadataCache.set(key, { fingerprint, value });
+  while (metadataCache.size > MAX_METADATA_CACHE_ENTRIES) metadataCache.delete(metadataCache.keys().next().value as string);
+  try { return await value; } catch (error) { if (metadataCache.get(key)?.value === value) metadataCache.delete(key); throw error; }
 }
 
 export async function listChapters(seriesId: number): Promise<StoredChapter[]> {
@@ -186,6 +187,45 @@ export async function chooseSeriesCover(seriesId: number): Promise<string | null
   await FileSystem.copyAsync({ from: asset.uri, to: localUri }); await setSeriesCover(seriesId, localUri); return localUri;
 }
 
+type FolderSelection = { directoryUri: string; files: { name: string; uri: string; path?: string; size?: number }[] };
+
+async function syncIosFolderSelection(selection: FolderSelection, sourceName?: string) {
+  const grouped = new Map<string, { name: string; uri: string; path?: string; size?: number }[]>();
+  for (const file of selection.files ?? []) {
+    const pathParts = (file.path ?? file.name).split('/').filter(Boolean);
+    const seriesName = pathParts.length > 1 ? pathParts[0]! : displayName(selection.directoryUri);
+    const items = grouped.get(seriesName) ?? [];
+    items.push(file);
+    grouped.set(seriesName, items);
+  }
+  const db = await getDatabase(); const now = Date.now(); const seenSeriesUris = new Set<string>(); const seenChapterUris = new Set<string>();
+  for (const [seriesName, files] of grouped) {
+    const sourceUri = `${selection.directoryUri}#series=${encodeURIComponent(seriesName)}`;
+    seenSeriesUris.add(sourceUri);
+    const existing = await db.getFirstAsync<any>('SELECT id, cover_uri FROM series WHERE source_uri = ?', sourceUri);
+    const seriesId = existing ? Number(existing.id) : Number((await db.runAsync('INSERT INTO series(title, source_uri, created_at, updated_at) VALUES(?, ?, ?, ?)', cleanSeriesTitle(seriesName), sourceUri, now, now)).lastInsertRowId);
+    if (existing) await db.runAsync('UPDATE series SET title = ?, updated_at = ? WHERE id = ?', cleanSeriesTitle(seriesName), now, seriesId);
+    let chapterNumber = 1;
+    for (const file of files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))) {
+      const format = formatFromName(file.name); if (!format) continue;
+      seenChapterUris.add(file.uri);
+      await importChapter(file.uri, file.name, format, seriesId, chapterNumber++);
+    }
+    if (!existing?.cover_uri) {
+      const first = await db.getFirstAsync<any>('SELECT local_uri, format FROM chapters WHERE series_id = ? ORDER BY chapter_number LIMIT 1', seriesId);
+      if (first?.format === 'epub') { const cover = await epubFirstPageUri(first.local_uri, seriesId); if (cover) await setSeriesCover(seriesId, cover); }
+    }
+  }
+  const oldChapters = await db.getAllAsync<any>('SELECT c.id, c.local_uri, s.source_uri FROM chapters c JOIN series s ON s.id = c.series_id');
+  for (const item of oldChapters) if (typeof item.source_uri === 'string' && item.source_uri.startsWith(`${selection.directoryUri}#series=`) && !seenChapterUris.has(item.local_uri)) await db.runAsync('DELETE FROM chapters WHERE id = ?', item.id);
+  const oldSeries = await db.getAllAsync<any>('SELECT id, source_uri FROM series');
+  for (const item of oldSeries) if (typeof item.source_uri === 'string' && item.source_uri.startsWith(`${selection.directoryUri}#series=`) && !seenSeriesUris.has(item.source_uri)) await db.runAsync('DELETE FROM series WHERE id = ?', item.id);
+  const existingSource = await db.getFirstAsync<any>('SELECT name FROM sources WHERE type = ? AND endpoint = ?', 'local', selection.directoryUri);
+  const sourceCount = await db.getFirstAsync<any>('SELECT COUNT(*) AS total FROM sources WHERE type = ?', 'local');
+  await saveSource('local', sourceName || existingSource?.name || `漫画源${Number(sourceCount?.total || 0) + 1}`, selection.directoryUri, grouped.size);
+  return listSeries();
+}
+
 // The selected directory is the library root. Its direct children are series; files below each child are chapters.
 export async function configureLibraryRoot(): Promise<LibrarySeries[]> {
   await initializeLibrary();
@@ -194,36 +234,16 @@ export async function configureLibraryRoot(): Promise<LibrarySeries[]> {
     if (!picker?.pickFolder) throw new Error('iOS 文件夹选择模块未安装，请使用文件导入或重新构建开发版');
     const selection = await picker.pickFolder() as { directoryUri: string; files: { name: string; uri: string; path?: string; size?: number }[] } | null;
     if (!selection?.directoryUri) return listSeries();
-    const grouped = new Map<string, { name: string; uri: string; size?: number }[]>();
-    for (const file of selection.files ?? []) {
-      const pathParts = (file.path ?? file.name).split('/').filter(Boolean); const seriesName = pathParts.length > 1 ? pathParts[0]! : displayName(selection.directoryUri);
-      const items = grouped.get(seriesName) ?? []; items.push(file); grouped.set(seriesName, items);
-    }
-    const db = await getDatabase(); const now = Date.now(); let seriesCount = 0;
-    for (const [seriesName, files] of grouped) {
-      const sourceUri = `${selection.directoryUri}#series=${encodeURIComponent(seriesName)}`;
-      const existing = await db.getFirstAsync<any>('SELECT id, cover_uri FROM series WHERE source_uri = ?', sourceUri);
-      const seriesId = existing ? Number(existing.id) : Number((await db.runAsync('INSERT INTO series(title, source_uri, created_at, updated_at) VALUES(?, ?, ?, ?)', cleanSeriesTitle(seriesName), sourceUri, now, now)).lastInsertRowId);
-      let chapterNumber = 1;
-      for (const file of files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))) {
-        const format = formatFromName(file.name); if (!format) continue;
-        await importChapter(file.uri, file.name, format, seriesId, chapterNumber++);
-      }
-      if (!existing?.cover_uri) { const first = await db.getFirstAsync<any>('SELECT local_uri, format FROM chapters WHERE series_id = ? ORDER BY chapter_number LIMIT 1', seriesId); if (first?.format === 'epub') { const cover = await epubFirstPageUri(first.local_uri, seriesId); if (cover) await setSeriesCover(seriesId, cover); } }
-      seriesCount++;
-    }
-    const sourceCount = await db.getFirstAsync<any>('SELECT COUNT(*) AS total FROM sources WHERE type = ?', 'local');
-    await saveSource('local', `漫画源${Number(sourceCount?.total ?? 0) + 1}`, selection.directoryUri, seriesCount);
-    return listSeries();
+    return syncIosFolderSelection(selection);
   }
   const scanner = (NativeModules as any).SafScanner;
   if (!scanner?.scan) throw new Error('Android 文件扫描模块未加载，请重新安装当前 APK。');
   const permission = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
   if (!permission.granted) return [];
   const nativeSeries = await scanner.scan(permission.directoryUri) as { name: string; uri: string; chapters: { name: string; uri: string }[] }[];
-  const db = await getDatabase(); const now = Date.now(); let seriesCount = 0;
+  const db = await getDatabase(); const now = Date.now(); let seriesCount = 0; const seenSeriesUris = new Set<string>(); const seenChapterUris = new Set<string>();
   for (const native of nativeSeries) {
-    const child = native.uri; const folderName = native.name;
+    const child = native.uri; const folderName = native.name; seenSeriesUris.add(child);
     const candidates = native.chapters;
     if (!candidates.length) continue;
     const existing = await db.getFirstAsync<any>('SELECT id, cover_uri FROM series WHERE source_uri = ?', child);
@@ -232,7 +252,7 @@ export async function configureLibraryRoot(): Promise<LibrarySeries[]> {
     else { const created = await db.runAsync('INSERT INTO series(title, source_uri, created_at, updated_at) VALUES(?, ?, ?, ?)', cleanSeriesTitle(folderName), child, now, now); seriesId = Number(created.lastInsertRowId); }
     let chapterNumber = 1;
     for (const candidate of candidates.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))) {
-      const format = formatFromName(candidate.name)!;
+      const format = formatFromName(candidate.name)!; seenChapterUris.add(candidate.uri);
       let chapter: StoredChapter;
       try { chapter = await importChapter(candidate.uri, candidate.name, format, seriesId, chapterNumber++); } catch { continue; }
       if (!existing?.cover_uri && chapterNumber === 2 && format === 'epub') {
@@ -241,6 +261,10 @@ export async function configureLibraryRoot(): Promise<LibrarySeries[]> {
     }
     seriesCount++;
   }
+  const storedChapters = await db.getAllAsync<any>('SELECT id, local_uri FROM chapters');
+  for (const chapter of storedChapters) if (typeof chapter.local_uri === 'string' && isWithinSource(chapter.local_uri, permission.directoryUri) && !seenChapterUris.has(chapter.local_uri)) await db.runAsync('DELETE FROM chapters WHERE id = ?', chapter.id);
+  const storedSeries = await db.getAllAsync<any>('SELECT id, source_uri FROM series');
+  for (const item of storedSeries) if (typeof item.source_uri === 'string' && isWithinSource(item.source_uri, permission.directoryUri) && !seenSeriesUris.has(item.source_uri)) await db.runAsync('DELETE FROM series WHERE id = ?', item.id);
   const existingSource = await db.getFirstAsync<any>('SELECT name FROM sources WHERE type = ? AND endpoint = ?', 'local', permission.directoryUri);
   const sourceCount = await db.getFirstAsync<any>('SELECT COUNT(*) AS total FROM sources WHERE type = ?', 'local');
   await saveSource('local', existingSource?.name || `漫画源${Number(sourceCount?.total || 0) + 1}`, permission.directoryUri, seriesCount);
@@ -249,7 +273,20 @@ export async function configureLibraryRoot(): Promise<LibrarySeries[]> {
 
 export async function refreshAllLibraries(): Promise<LibrarySeries[]> {
   await initializeLibrary();
-  if (Platform.OS !== 'android') return listSeries();
+  if (Platform.OS !== 'android') {
+    const picker = (NativeModules as any).VeaderFolderPicker;
+    if (!picker?.refreshFolder) return listSeries();
+    const sources = await listSources();
+    for (const source of sources.filter(item => item.type === 'local' && item.enabled)) {
+      try {
+        const selection = await picker.refreshFolder(source.endpoint) as FolderSelection | null;
+        if (selection?.directoryUri) await syncIosFolderSelection(selection, source.name);
+      } catch (error) {
+        console.warn('iOS 漫画源刷新失败', source.endpoint, error);
+      }
+    }
+    return listSeries();
+  }
   const scanner = (NativeModules as any).SafScanner;
   if (!scanner?.scan) throw new Error('Android 文件扫描模块未加载，请重新安装当前 APK。');
   const sources = await listSources();
@@ -283,13 +320,13 @@ export async function refreshAllLibraries(): Promise<LibrarySeries[]> {
       // exist under this granted source. Keep progress for entries still seen.
       const storedChapters = await db.getAllAsync<any>('SELECT id, local_uri FROM chapters');
       for (const chapter of storedChapters) {
-        if (typeof chapter.local_uri === 'string' && chapter.local_uri.startsWith(source.endpoint) && !seenChapterUris.has(chapter.local_uri)) {
+        if (typeof chapter.local_uri === 'string' && isWithinSource(chapter.local_uri, source.endpoint) && !seenChapterUris.has(chapter.local_uri)) {
           await db.runAsync('DELETE FROM chapters WHERE id = ?', chapter.id);
         }
       }
       const storedSeries = await db.getAllAsync<any>('SELECT id, source_uri FROM series');
       for (const item of storedSeries) {
-        if (typeof item.source_uri === 'string' && item.source_uri.startsWith(source.endpoint) && !seenSeriesUris.has(item.source_uri)) {
+        if (typeof item.source_uri === 'string' && isWithinSource(item.source_uri, source.endpoint) && !seenSeriesUris.has(item.source_uri)) {
           await db.runAsync('DELETE FROM series WHERE id = ?', item.id);
         }
       }
@@ -309,7 +346,7 @@ export async function refreshAllLibraries(): Promise<LibrarySeries[]> {
           const seriesName = parts.length > 1 ? parts[parts.length - 2]! : source.name;
           const items = grouped.get(seriesName) ?? []; items.push(entry); grouped.set(seriesName, items);
         }
-        const db = await getDatabase(); const now = Date.now(); const seenSeriesUris = new Set<string>(); let seriesCount = 0;
+        const db = await getDatabase(); const now = Date.now(); const seenSeriesUris = new Set<string>(); const seenChapterUris = new Set<string>(); let seriesCount = 0;
         for (const [seriesName, items] of grouped) {
           const sourceUri = `${source.endpoint}#series=${encodeURIComponent(seriesName)}`; seenSeriesUris.add(sourceUri);
           const existing = await db.getFirstAsync<any>('SELECT id, cover_uri FROM series WHERE source_uri = ?', sourceUri);
@@ -318,13 +355,18 @@ export async function refreshAllLibraries(): Promise<LibrarySeries[]> {
           let chapterNumber = 1;
           for (const entry of items.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))) {
             const format = formatFromName(entry.name)!; const target = await remoteCacheTarget(source.id, entry.path, format);
-            const info = await FileSystem.getInfoAsync(target);
-            if (!info.exists) await remote.download(source.type, source.endpoint, entry.path, undefined, undefined, target);
+            const info = await FileSystem.getInfoAsync(target, { size: true });
+            if (!info.exists || (entry.size !== undefined && Number((info as any).size ?? -1) !== Number(entry.size))) {
+              await remote.download(source.type, source.endpoint, entry.path, undefined, undefined, target);
+            }
+            seenChapterUris.add(target);
             await importChapter(target, entry.name, format, seriesId, chapterNumber++);
           }
           seriesCount++;
           if (!existing?.cover_uri) { const first = await db.getFirstAsync<any>('SELECT local_uri FROM chapters WHERE series_id = ? ORDER BY chapter_number LIMIT 1', seriesId); if (first && formatFromName(first.local_uri) === 'epub') { const cover = await epubFirstPageUri(first.local_uri, seriesId); if (cover) await setSeriesCover(seriesId, cover); } }
         }
+        const oldChapters = await db.getAllAsync<any>('SELECT c.id, c.local_uri, s.source_uri FROM chapters c JOIN series s ON s.id = c.series_id');
+        for (const item of oldChapters) if (typeof item.source_uri === 'string' && item.source_uri.startsWith(`${source.endpoint}#series=`) && !seenChapterUris.has(item.local_uri)) await db.runAsync('DELETE FROM chapters WHERE id = ?', item.id);
         const oldSeries = await db.getAllAsync<any>('SELECT id, source_uri FROM series');
         for (const item of oldSeries) if (typeof item.source_uri === 'string' && item.source_uri.startsWith(`${source.endpoint}#series=`) && !seenSeriesUris.has(item.source_uri)) await db.runAsync('DELETE FROM series WHERE id = ?', item.id);
         await saveSource(source.type, source.name, source.endpoint, seriesCount);
@@ -341,7 +383,12 @@ async function remoteCacheTarget(sourceId: number, remotePath: string, format: B
 
 async function importChapter(uri: string, name: string, format: BookFormat, seriesId: number, chapterNumber: number): Promise<StoredChapter> {
   const db = await getDatabase(); const existing = await db.getFirstAsync<any>('SELECT * FROM chapters WHERE original_name = ? AND series_id = ?', name, seriesId);
-  if (existing) return (await listChapters(seriesId)).find(chapter => chapter.id === existing.id)!;
+  if (existing) {
+    if (existing.local_uri !== uri || existing.format !== format || existing.chapter_number !== chapterNumber) {
+      await db.runAsync('UPDATE chapters SET chapter_number = ?, format = ?, local_uri = ?, updated_at = ? WHERE id = ?', chapterNumber, format, uri, Date.now(), existing.id);
+    }
+    return (await listChapters(seriesId)).find(chapter => chapter.id === existing.id)!;
+  }
   const now = Date.now(); const title = name.replace(/\.(epub|mobi|pdf)$/i, '');
   // `uri` is an Android SAF content URI. It remains the authoritative source; no original book is copied here.
   const result = await db.runAsync(`INSERT INTO chapters(series_id, chapter_number, chapter_title, format, local_uri, original_name, file_size, added_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`, seriesId, chapterNumber, title, format, uri, name, 0, now, now);
@@ -350,6 +397,10 @@ async function importChapter(uri: string, name: string, format: BookFormat, seri
 
 function displayName(uri: string) { return decodeURIComponent(uri).split('/').filter(Boolean).pop() ?? uri; }
 function cleanSeriesTitle(value: string) { return value.replace(/^\[[^\]]+\]\s*/, '').trim(); }
+function isWithinSource(value: string, endpoint: string) {
+  const base = endpoint.endsWith('/') ? endpoint.slice(0, -1) : endpoint;
+  return value === base || value.startsWith(`${base}/`) || value.startsWith(`${base}#`);
+}
 async function epubFirstPageUri(uri: string, seriesId: number): Promise<string | null> {
   try {
     const scanned = await scanEpub(uri); const page = scanned.pages[0]; if (!page) return null;
@@ -382,103 +433,29 @@ export async function renameSource(id: number, name: string) {
 export async function deleteSource(id: number) {
   const db = await getDatabase();
   const source = await db.getFirstAsync<any>('SELECT type, endpoint FROM sources WHERE id = ?', id);
-  if (source?.type === 'local') await db.runAsync('DELETE FROM series WHERE source_uri LIKE ?', `${source.endpoint}%`);
+  if (source) {
+    const rows = await db.getAllAsync<any>('SELECT id, source_uri FROM series');
+    for (const row of rows) {
+      if (typeof row.source_uri !== 'string') continue;
+      const owned = source.type === 'local'
+        ? isWithinSource(row.source_uri, source.endpoint)
+        : row.source_uri.startsWith(`${source.endpoint}#series=`);
+      if (owned) await db.runAsync('DELETE FROM series WHERE id = ?', row.id);
+    }
+  }
+  if (source && (source.type === 'ftp' || source.type === 'smb') && FileSystem.cacheDirectory) {
+    const root = `${FileSystem.cacheDirectory}remote-books/`;
+    try {
+      const files = await FileSystem.readDirectoryAsync(root);
+      await Promise.all(files.filter(file => file.startsWith(`${id}-`)).map(file => FileSystem.deleteAsync(`${root}${file}`, { idempotent: true }).catch(() => undefined)));
+    } catch { /* The remote source may not have downloaded anything. */ }
+  }
   await db.runAsync('DELETE FROM sources WHERE id = ?', id);
-}
-
-export async function listStoredBooks(): Promise<StoredBook[]> {
-  const db = await getDatabase();
-  const rows = await db.getAllAsync<any>('SELECT * FROM books ORDER BY updated_at DESC');
-  return rows.map(row => ({
-    id: row.id, title: row.title, author: row.author, format: row.format,
-    localUri: row.local_uri, originalName: row.original_name, fileSize: row.file_size,
-    coverUri: row.cover_uri, progress: row.progress, currentLocation: row.current_location,
-    addedAt: row.added_at, updatedAt: row.updated_at,
-  }));
-}
-
-export async function updateReadingProgress(id: number, progress: number, location: string) {
-  const db = await getDatabase();
-  await db.runAsync('UPDATE books SET progress = ?, current_location = ?, updated_at = ? WHERE id = ?', Math.max(0, Math.min(1, progress)), location, Date.now(), id);
-}
-
-export async function pickAndImportBooks(): Promise<StoredBook[]> {
-  await initializeLibrary();
-  const result = await DocumentPicker.getDocumentAsync({
-    type: ['application/epub+zip', 'application/pdf', 'application/x-mobipocket-ebook', 'application/octet-stream'],
-    multiple: true,
-    copyToCacheDirectory: true,
-  });
-  if (result.canceled) return [];
-  const imported: StoredBook[] = [];
-  for (const asset of result.assets) {
-    const format = formatFromName(asset.name);
-    if (!format) continue;
-    imported.push(await importAsset(asset.uri, asset.name, asset.size ?? 0, format));
-  }
-  return imported;
-}
-
-export async function pickAndImportFolder(): Promise<StoredBook[]> {
-  await initializeLibrary();
-  if (Platform.OS !== 'android') {
-    throw new Error('iOS 当前不支持直接授权文件夹源，请使用文件导入。');
-  }
-  const permission = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
-  if (!permission.granted) return [];
-  const candidates = await scanDirectory(permission.directoryUri, 0);
-  const imported: StoredBook[] = [];
-  for (const candidate of candidates) {
-    const format = formatFromName(candidate.name);
-    if (!format) continue;
-    const info = await FileSystem.getInfoAsync(candidate.uri, { size: true });
-    imported.push(await importAsset(candidate.uri, candidate.name, info.exists && 'size' in info ? info.size : 0, format));
-  }
-  await saveSource('local', '本地文件夹', permission.directoryUri, imported.length);
-  return imported;
-}
-
-async function scanDirectory(uri: string, depth: number): Promise<{ uri: string; name: string }[]> {
-  if (depth > 8) return [];
-  let children: string[];
-  try { children = await FileSystem.StorageAccessFramework.readDirectoryAsync(uri); }
-  catch { children = await FileSystem.StorageAccessFramework.readDirectoryAsync(asTreeUri(uri)); }
-  const results: { uri: string; name: string }[] = [];
-  for (const child of children) {
-    const name = decodeURIComponent(child).split('/').pop() ?? child;
-    if (formatFromName(name)) { results.push({ uri: child, name }); continue; }
-    try { results.push(...await scanDirectory(child, depth + 1)); } catch { /* A non-book file is not a directory. */ }
-  }
-  return results;
-}
-
-// Android returns direct children as `.../tree/<root>/document/<child>`, but Expo's
-// recursive directory API accepts the child again as a tree URI on API 34.
-function asTreeUri(uri: string) {
-  const match = uri.match(/^(.*)\/tree\/[^/]+\/document\/(.+)$/);
-  return match ? `${match[1]}/tree/${match[2]}` : uri;
 }
 
 function formatFromName(name: string): BookFormat | null {
   const extension = name.split('.').pop()?.toLowerCase();
   return extension === 'epub' || extension === 'mobi' || extension === 'pdf' ? extension : null;
-}
-
-async function importAsset(uri: string, name: string, size: number, format: BookFormat): Promise<StoredBook> {
-  const root = `${FileSystem.documentDirectory}library/`;
-  await FileSystem.makeDirectoryAsync(root, { intermediates: true });
-  const safeName = `${Date.now()}-${name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-  const localUri = `${root}${safeName}`;
-  await FileSystem.copyAsync({ from: uri, to: localUri });
-  const metadata = await extractMetadata(localUri, name, format);
-  const db = await getDatabase();
-  const now = Date.now();
-  const result = await db.runAsync(
-    `INSERT INTO books(title, author, format, local_uri, original_name, file_size, added_at, updated_at)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
-    metadata.title, metadata.author, format, localUri, name, size, now, now,
-  );
-  return { id: Number(result.lastInsertRowId), title: metadata.title, author: metadata.author, format, localUri, originalName: name, fileSize: size, coverUri: null, progress: 0, currentLocation: null, addedAt: now, updatedAt: now };
 }
 
 async function extractMetadata(uri: string, filename: string, format: BookFormat) {

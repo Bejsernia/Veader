@@ -23,15 +23,14 @@ async function writeSettings(settings: CacheSettings) {
 async function listFiles(uri: string): Promise<CacheFile[]> {
   let children: string[];
   try { children = await FileSystem.readDirectoryAsync(uri); } catch { return []; }
-  const files: CacheFile[] = [];
-  for (const child of children) {
+  const entries = await Promise.all(children.map(async child => {
     const childUri = child.startsWith('file://') || child.startsWith('content://') ? child : `${uri.endsWith('/') ? uri : `${uri}/`}${child}`;
     const info = await FileSystem.getInfoAsync(childUri, { size: true });
-    if (!info.exists) continue;
-    if ((info as any).isDirectory) files.push(...await listFiles(childUri));
-    else files.push({ uri: childUri, size: (info as any).size ?? 0, modified: (info as any).modificationTime ?? 0 });
-  }
-  return files;
+    if (!info.exists) return [] as CacheFile[];
+    if ((info as any).isDirectory) return listFiles(childUri);
+    return [{ uri: childUri, size: (info as any).size ?? 0, modified: (info as any).modificationTime ?? 0 }];
+  }));
+  return entries.flat();
 }
 
 export function formatCacheSize(bytes: number) {

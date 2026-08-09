@@ -15,9 +15,9 @@ export class NativeModuleRequiredError extends Error {
   }
 }
 
-function remoteModule() {
+function remoteModule(protocol: 'FTP' | 'SMB' = 'FTP') {
   const module = (NativeModules as any).RemoteSource;
-  if (Platform.OS !== 'android' || !module) throw new NativeModuleRequiredError('FTP');
+  if (Platform.OS !== 'android' || !module) throw new NativeModuleRequiredError(protocol);
   return module;
 }
 
@@ -34,18 +34,18 @@ export async function deleteRemoteCredentials(endpoint: string) {
 export class FtpAdapter implements RemoteSourceAdapter {
   readonly scheme = 'ftp' as const;
   private credentials?: RemoteCredentials;
-  async connect(credentials: RemoteCredentials) { this.credentials = credentials; await remoteModule().scan('ftp', credentials.endpoint, credentials.username, credentials.password); }
-  async list(path: string): Promise<RemoteEntry[]> { const c = this.credentials; if (!c) throw new Error('FTP 尚未连接'); return (await remoteModule().scan('ftp', c.endpoint, c.username, c.password) as any[]).filter(item => !path || item.path.startsWith(path)); }
-  async download(remotePath: string, localUri: string) { const c = this.credentials; if (!c) throw new Error('FTP 尚未连接'); await remoteModule().download('ftp', c.endpoint, remotePath, c.username, c.password, localUri); }
+  async connect(credentials: RemoteCredentials) { this.credentials = credentials; await remoteModule('FTP').scan('ftp', credentials.endpoint, credentials.username, credentials.password); }
+  async list(path: string): Promise<RemoteEntry[]> { const c = this.credentials; if (!c) throw new Error('FTP 尚未连接'); return (await remoteModule('FTP').scan('ftp', c.endpoint, c.username, c.password) as any[]).filter(item => !path || item.path.startsWith(path)); }
+  async download(remotePath: string, localUri: string) { const c = this.credentials; if (!c) throw new Error('FTP 尚未连接'); await remoteModule('FTP').download('ftp', c.endpoint, remotePath, c.username, c.password, localUri); }
   async disconnect() { this.credentials = undefined; }
 }
 
 export class SmbAdapter implements RemoteSourceAdapter {
   readonly scheme = 'smb' as const;
   private credentials?: RemoteCredentials;
-  async connect(credentials: RemoteCredentials) { this.credentials = credentials; await remoteModule().scan('smb', credentials.endpoint, credentials.username, credentials.password); }
-  async list(path: string): Promise<RemoteEntry[]> { const c = this.credentials; if (!c) throw new Error('SMB 尚未连接'); return (await remoteModule().scan('smb', c.endpoint, c.username, c.password) as any[]).filter(item => !path || item.path.startsWith(path)); }
-  async download(remotePath: string, localUri: string) { const c = this.credentials; if (!c) throw new Error('SMB 尚未连接'); await remoteModule().download('smb', c.endpoint, remotePath, c.username, c.password, localUri); }
+  async connect(credentials: RemoteCredentials) { this.credentials = credentials; await remoteModule('SMB').scan('smb', credentials.endpoint, credentials.username, credentials.password); }
+  async list(path: string): Promise<RemoteEntry[]> { const c = this.credentials; if (!c) throw new Error('SMB 尚未连接'); return (await remoteModule('SMB').scan('smb', c.endpoint, c.username, c.password) as any[]).filter(item => !path || item.path.startsWith(path)); }
+  async download(remotePath: string, localUri: string) { const c = this.credentials; if (!c) throw new Error('SMB 尚未连接'); await remoteModule('SMB').download('smb', c.endpoint, remotePath, c.username, c.password, localUri); }
   async disconnect() { this.credentials = undefined; }
 }
 import { NativeModules, Platform } from 'react-native';
