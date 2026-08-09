@@ -404,7 +404,23 @@ function AppContent() {
   const [selectedStored, setSelectedStored] = useState<StoredBook>(); const [importing, setImporting] = useState(false); const [libraryReady, setLibraryReady] = useState(false);
   const [series, setSeries] = useState<LibrarySeries[]>([]); const [selectedSeries, setSelectedSeries] = useState<LibrarySeries>(); const [seriesChapters, setSeriesChapters] = useState<StoredChapter[]>([]);
   const refreshBooks = async () => { setSeries(await listSeries()); };
-  useEffect(() => { let active = true; initializeLibrary().then(refreshBooks).catch(console.warn).finally(() => { if (active) setLibraryReady(true); }); return () => { active = false; }; }, []);
+  useEffect(() => {
+    let active = true;
+    const bootstrap = async () => {
+      try {
+        await initializeLibrary();
+        const fastSeries = await listSeries({ fast: true });
+        if (active) { setSeries(fastSeries); setLibraryReady(true); }
+        const hydratedSeries = await listSeries();
+        if (active) setSeries(hydratedSeries);
+      } catch (reason) {
+        console.warn(reason);
+        if (active) setLibraryReady(true);
+      }
+    };
+    void bootstrap();
+    return () => { active = false; };
+  }, []);
   const goBack = () => { const currentScreen = screen; setScreen(currentScreen === 'document' ? 'seriesDetail' : 'main'); if (currentScreen === 'document') { void listSeries().then(updated => { setSeries(updated); if (selectedSeries) { const next = updated.find(item => item.id === selectedSeries.id); if (next) { setSelectedSeries(next); void listChapters(next.id).then(setSeriesChapters); } } }).catch(console.warn); } };
   useEffect(() => { const subscription = BackHandler.addEventListener('hardwareBackPress', () => { if (screen === 'main') return false; goBack(); return true; }); return () => subscription.remove(); }, [screen]);
   const refreshLibraries = async () => { setImporting(true); try { await refreshAllLibraries(); await refreshBooks(); } finally { setImporting(false); } };
