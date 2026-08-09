@@ -42,7 +42,10 @@ export function formatCacheSize(bytes: number) {
 
 export async function getCacheSizeBytes() {
   if (!FileSystem.cacheDirectory) return 0;
-  const files = await listFiles(FileSystem.cacheDirectory);
+  // The cache screen and its clear action are specifically about rendered
+  // comic pages. Keep metadata, source archives, and persistent covers out of
+  // this number so clearing page cache does not appear to leave a stale value.
+  const files = await listPageCacheFiles();
   return files.reduce((sum, file) => sum + file.size, 0);
 }
 

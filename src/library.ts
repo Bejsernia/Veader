@@ -233,7 +233,10 @@ export async function refreshAllLibraries(): Promise<LibrarySeries[]> {
     try {
       const nativeSeries = await scanner.scan(source.endpoint) as { name: string; uri: string; chapters: { name: string; uri: string }[] }[];
       const db = await getDatabase(); const now = Date.now(); let seriesCount = 0;
+      const seenSeriesUris = new Set<string>();
+      const seenChapterUris = new Set<string>();
       for (const native of nativeSeries) {
+        seenSeriesUris.add(native.uri);
         if (!native.chapters.length) continue;
         const existing = await db.getFirstAsync<any>('SELECT id, cover_uri FROM series WHERE source_uri = ?', native.uri);
         let seriesId: number;
@@ -243,6 +246,7 @@ export async function refreshAllLibraries(): Promise<LibrarySeries[]> {
         for (const candidate of native.chapters.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))) {
           const format = formatFromName(candidate.name);
           if (!format) continue;
+          seenChapterUris.add(candidate.uri);
           let chapter: StoredChapter;
           try { chapter = await importChapter(candidate.uri, candidate.name, format, seriesId, chapterNumber++); } catch { continue; }
           if (!existing?.cover_uri && chapterNumber === 2 && format === 'epub') {
@@ -250,6 +254,20 @@ export async function refreshAllLibraries(): Promise<LibrarySeries[]> {
           }
         }
         seriesCount++;
+      }
+      // A refresh must remove database rows for files/folders that no longer
+      // exist under this granted source. Keep progress for entries still seen.
+      const storedChapters = await db.getAllAsync<any>('SELECT id, local_uri FROM chapters');
+      for (const chapter of storedChapters) {
+        if (typeof chapter.local_uri === 'string' && chapter.local_uri.startsWith(source.endpoint) && !seenChapterUris.has(chapter.local_uri)) {
+          await db.runAsync('DELETE FROM chapters WHERE id = ?', chapter.id);
+        }
+      }
+      const storedSeries = await db.getAllAsync<any>('SELECT id, source_uri FROM series');
+      for (const item of storedSeries) {
+        if (typeof item.source_uri === 'string' && item.source_uri.startsWith(source.endpoint) && !seenSeriesUris.has(item.source_uri)) {
+          await db.runAsync('DELETE FROM series WHERE id = ?', item.id);
+        }
       }
       await saveSource('local', source.name, source.endpoint, seriesCount);
     } catch (error) { console.warn('漫画源刷新失败', source.endpoint, error); }
