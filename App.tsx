@@ -389,17 +389,17 @@ function AppContent() {
   const { isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<Tab>('library'); const [screen, setScreen] = useState<Screen>('main');
-  const [selectedStored, setSelectedStored] = useState<StoredBook>(); const [importing, setImporting] = useState(false);
+  const [selectedStored, setSelectedStored] = useState<StoredBook>(); const [importing, setImporting] = useState(false); const [libraryReady, setLibraryReady] = useState(false);
   const [series, setSeries] = useState<LibrarySeries[]>([]); const [selectedSeries, setSelectedSeries] = useState<LibrarySeries>(); const [seriesChapters, setSeriesChapters] = useState<StoredChapter[]>([]);
   const refreshBooks = async () => { setSeries(await listSeries()); };
-  useEffect(() => { initializeLibrary().then(refreshBooks).catch(console.warn); }, []);
+  useEffect(() => { let active = true; initializeLibrary().then(refreshBooks).catch(console.warn).finally(() => { if (active) setLibraryReady(true); }); return () => { active = false; }; }, []);
   const goBack = () => { const currentScreen = screen; setScreen(currentScreen === 'document' ? 'seriesDetail' : 'main'); if (currentScreen === 'document') { void listSeries().then(updated => { setSeries(updated); if (selectedSeries) { const next = updated.find(item => item.id === selectedSeries.id); if (next) { setSelectedSeries(next); void listChapters(next.id).then(setSeriesChapters); } } }).catch(console.warn); } };
   useEffect(() => { const subscription = BackHandler.addEventListener('hardwareBackPress', () => { if (screen === 'main') return false; goBack(); return true; }); return () => subscription.remove(); }, [screen]);
   const refreshLibraries = async () => { setImporting(true); try { await refreshAllLibraries(); await refreshBooks(); } finally { setImporting(false); } };
   const openSeries = async (value: LibrarySeries) => { setSelectedSeries(value); setSeriesChapters(await listChapters(value.id)); setScreen('seriesDetail'); };
   const openChapter = (chapter: StoredChapter, owner: LibrarySeries | undefined = selectedSeries) => { setSelectedStored({ ...chapter, author: owner?.author || chapter.author || '' }); setScreen('document'); };
   const continueSeries = async (value: LibrarySeries) => { const chapters = await listChapters(value.id); const target = chapters.find(chapter => chapter.id === value.currentChapterId) || chapters[0]; if (target) { setSelectedSeries(value); setSeriesChapters(chapters); openChapter(target, value); } };
-  const content = useMemo(() => tab === 'library' ? <SeriesLibrary series={series} importing={importing} refreshLibraries={refreshLibraries} openSeries={openSeries} continueSeries={continueSeries} openSources={() => setScreen('sources')} /> : tab === 'recent' ? <Recent series={series} openSeries={openSeries} clearHistory={id => clearSeriesHistory(id).then(refreshBooks).catch(console.warn)} /> : <Me navigate={setScreen} />, [tab, series, importing]);
+  const content = useMemo(() => !libraryReady ? <View style={[styles.flex, uiStyles.loadingState, isDark && styles.pageDark]}><ActivityIndicator size="large" color="#8B70F7" /><Text style={[styles.meta, isDark && styles.textMutedDark]}>正在加载漫画库…</Text></View> : tab === 'library' ? <SeriesLibrary series={series} importing={importing} refreshLibraries={refreshLibraries} openSeries={openSeries} continueSeries={continueSeries} openSources={() => setScreen('sources')} /> : tab === 'recent' ? <Recent series={series} openSeries={openSeries} clearHistory={id => clearSeriesHistory(id).then(refreshBooks).catch(console.warn)} /> : <Me navigate={setScreen} />, [tab, series, importing, libraryReady, isDark]);
   if (screen === 'document' && selectedStored) return <DocumentReader key={selectedStored.id} book={selectedStored} chapters={seriesChapters} onSelectChapter={chapter => setSelectedStored({ ...chapter, author: selectedSeries?.author || chapter.author || '' })} back={goBack} onProgress={(progress, location) => { if (!('seriesId' in selectedStored)) return; return updateChapterProgress(selectedStored as StoredChapter, progress, location); }} onSetCover={uri => { if (selectedSeries) setSeriesCover(selectedSeries.id, uri).then(refreshBooks).catch(console.warn); }} />;
   if (screen === 'seriesDetail' && selectedSeries) return <SeriesDetail series={selectedSeries} chapters={seriesChapters} back={() => setScreen('main')} openChapter={openChapter} continueReading={() => continueSeries(selectedSeries)} uploadCover={() => chooseSeriesCover(selectedSeries.id).then(async () => { await refreshBooks(); const updated = (await listSeries()).find(item => item.id === selectedSeries.id); if (updated) setSelectedSeries(updated); }).catch(console.warn)} />;
   if (screen === 'sources') return <Sources back={goBack} onBooksChanged={() => refreshBooks().catch(console.warn)} />;
@@ -467,6 +467,7 @@ const layoutStyles = StyleSheet.create({
 });
 
 const uiStyles = StyleSheet.create({
+  loadingState: { alignItems: 'center', justifyContent: 'center', gap: 12 },
   searchDark: { backgroundColor: '#27232D' },
   searchInputDark: { color: '#F4F0F8' },
   folderButtonDark: { backgroundColor: '#2A2530' },
