@@ -145,7 +145,7 @@ function Sources({ back, onBooksChanged }: { back: () => void; onBooksChanged: (
   const [name, setName] = useState(''); const [address, setAddress] = useState('');
   const [editing, setEditing] = useState<StoredSource | null>(null); const [editName, setEditName] = useState(''); const [swipedId, setSwipedId] = useState<number | null>(null); const touchStart = useRef(0);
   const { isDark } = useTheme();
-  const refresh = () => listSources().then(setSources).catch(reason => setError(reason instanceof Error ? reason.message : String(reason)));
+  const refresh = () => listSources().then(value => { setSources(value); setError(''); }).catch(reason => setError(reason instanceof Error ? reason.message : String(reason)));
   useEffect(() => { refresh(); }, []);
   const chooseLocalFolder = async () => { setShowAdd(false); setLoading(true); setError(''); try { await configureLibraryRoot(); await refresh(); onBooksChanged(); } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); } finally { setLoading(false); } };
   const add = async () => {
