@@ -22,6 +22,10 @@ export type ScannedEpub = {
 const extractionCache = new Map<string, Promise<ExtractedEpub>>();
 const scanCache = new Map<string, Promise<ScannedEpub>>();
 const ENTRY_PREFIX = 'epub-entry://';
+type PendingPage = { queueKey: string; sourceUri: string; entry: string; sessionId: string; targetUri: string; fileName: string; resolve: (value: string) => void; reject: (reason: unknown) => void };
+const pendingPages = new Map<string, PendingPage>();
+const pendingTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const activePages = new Map<string, Promise<string>>();
 
 export function scanEpub(sourceUri: string) {
   let cached = scanCache.get(sourceUri);
@@ -32,27 +36,65 @@ export function scanEpub(sourceUri: string) {
   return cached;
 }
 
-export async function extractEpubPage(sourceUri: string, entry: string, sessionId: string) {
+export function extractEpubPage(sourceUri: string, entry: string, sessionId: string) {
   const cacheRoot = FileSystem.cacheDirectory;
   if (!cacheRoot) throw new Error('应用缓存目录不可用');
-  const key = stableKey(entry);
-  const extension = entry.split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'img';
-  const targetUri = cacheRoot + 'epub-pages/' + sessionId + '/' + key + '.' + extension;
-  const info = await FileSystem.getInfoAsync(targetUri);
-  if (!info.exists) {
-    await FileSystem.makeDirectoryAsync(cacheRoot + 'epub-pages/' + sessionId + '/', { intermediates: true });
-    const scanner = (NativeModules as any).SafScanner;
-    if (Platform.OS === 'android' && scanner?.extractEpubEntry) {
-      const base64 = await scanner.extractEpubEntry(sourceUri, entry);
-      await FileSystem.writeAsStringAsync(targetUri, base64, { encoding: FileSystem.EncodingType.Base64 });
-    } else {
-      await extractEpubEntryWithJsZip(sourceUri, entry, targetUri);
+  const targetUri = pageTargetUri(cacheRoot, entry, sessionId);
+  const active = activePages.get(targetUri);
+  if (active) return active;
+  const queueKey = sourceUri + '\n' + sessionId;
+  const promise = new Promise<string>((resolve, reject) => {
+    pendingPages.set(targetUri, { queueKey, sourceUri, entry, sessionId, targetUri, fileName: targetUri.split('/').pop()!, resolve, reject });
+    if (!pendingTimers.has(queueKey)) {
+      pendingTimers.set(queueKey, setTimeout(() => { pendingTimers.delete(queueKey); void flushPageQueue(queueKey); }, 0));
     }
-  }
-  await trimCacheToLimit();
-  return targetUri;
+  });
+  activePages.set(targetUri, promise);
+  return promise.finally(() => activePages.delete(targetUri));
 }
 
+function pageTargetUri(cacheRoot: string, entry: string, sessionId: string) {
+  const key = stableKey(entry);
+  const extension = entry.split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'img';
+  return cacheRoot + 'epub-pages/' + sessionId + '/' + key + '.' + extension;
+}
+
+async function flushPageQueue(queueKey: string) {
+  const requests = [...pendingPages.entries()].filter(([, request]) => request.queueKey === queueKey).map(([targetUri, request]) => { pendingPages.delete(targetUri); return request; });
+  if (!requests.length) return;
+  try {
+    const cacheRoot = FileSystem.cacheDirectory;
+    if (!cacheRoot) throw new Error('cache directory unavailable');
+    const targetDir = cacheRoot + 'epub-pages/' + requests[0]!.sessionId + '/';
+    const missing: PendingPage[] = [];
+    for (const request of requests) {
+      const info = await FileSystem.getInfoAsync(request.targetUri);
+      if (!info.exists) missing.push(request);
+    }
+    if (missing.length) {
+      await FileSystem.makeDirectoryAsync(targetDir, { intermediates: true });
+      const scanner = (NativeModules as any).SafScanner;
+      if (Platform.OS === 'android' && scanner?.extractEpubEntries) {
+        await scanner.extractEpubEntries(missing[0]!.sourceUri, missing.map(item => item.entry), targetDir, missing.map(item => item.fileName));
+      } else if (Platform.OS === 'android' && scanner?.extractEpubEntry) {
+        for (const item of missing) {
+          const base64 = await scanner.extractEpubEntry(item.sourceUri, item.entry);
+          await FileSystem.writeAsStringAsync(item.targetUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+        }
+      } else {
+        await extractEpubEntriesWithJsZip(missing[0]!.sourceUri, missing.map(item => item.entry), missing.map(item => item.targetUri));
+      }
+    }
+    await trimCacheToLimit();
+    for (const request of requests) {
+      const info = await FileSystem.getInfoAsync(request.targetUri);
+      if (!info.exists) throw new Error('EPUB page extraction failed');
+      request.resolve(request.targetUri);
+    }
+  } catch (error) {
+    requests.forEach(request => request.reject(error));
+  }
+}
 export async function clearEpubSession(sessionId: string) {
   if (!FileSystem.cacheDirectory) return;
   await FileSystem.deleteAsync(FileSystem.cacheDirectory + 'epub-pages/' + sessionId, { idempotent: true });
@@ -109,6 +151,16 @@ async function scanEpubWithJsZip(sourceUri: string): Promise<ScannedEpub> {
   const creators = asArray<any>(metadata.creator).map(item => textValue(item)).filter(Boolean);
   const writingMode = String(asArray<any>(metadata.meta).find(meta => meta?.['@_name'] === 'primary-writing-mode')?.['@_content'] ?? '');
   return { title: textValue(metadata.title), author: [...new Set(creators)].join('、'), direction: writingMode.endsWith('-rl') ? 'rtl' : 'ltr', pages };
+}
+
+async function extractEpubEntriesWithJsZip(sourceUri: string, entries: string[], targetUris: string[]) {
+  const base64 = await FileSystem.readAsStringAsync(sourceUri, { encoding: FileSystem.EncodingType.Base64 });
+  const zip = await JSZip.loadAsync(base64, { base64: true });
+  for (let index = 0; index < entries.length; index++) {
+    const page = zip.file(entries[index]!);
+    if (!page) throw new Error('EPUB page missing');
+    await FileSystem.writeAsStringAsync(targetUris[index]!, await page.async('base64'), { encoding: FileSystem.EncodingType.Base64 });
+  }
 }
 
 async function extractEpubEntryWithJsZip(sourceUri: string, entry: string, targetUri: string) {

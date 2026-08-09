@@ -30,7 +30,9 @@ async function parseEpubComic(book: StoredBook): Promise<EpubComic> {
   try {
     const scanned = await scanEpub(book.localUri);
     return { title: scanned.title || book.title, author: scanned.author || book.author, direction: scanned.direction, pages: scanned.pages };
-  } catch { /* Fall back to the legacy extractor for unsupported EPUB containers. */ }
+  } catch (reason) {
+    throw reason instanceof Error ? reason : new Error(String(reason));
+  }
   const extracted = await ensureEpubExtracted(book.localUri);
   const { opf, packagePath, rootUri } = extracted;
   const manifestItems = asArray<any>(opf?.manifest?.item);
@@ -47,7 +49,7 @@ async function parseEpubComic(book: StoredBook): Promise<EpubComic> {
     const chapter = await FileSystem.readAsStringAsync(`${rootUri}${chapterPath}`);
     const source = chapter.match(/<(?:img|image)[^>]+(?:src|href)=["']([^"']+)["']/i)?.[1];
     if (!source) continue;
-    const imageUri = resolveEpubUri(rootUri, chapterPath, source);
+    const imageUri = resolveEpubUri(rootUri, chapterPath, source!);
     const imageInfo = await FileSystem.getInfoAsync(imageUri);
     if (!imageInfo.exists) continue;
     pages.push({ index: pages.length, imageUri });

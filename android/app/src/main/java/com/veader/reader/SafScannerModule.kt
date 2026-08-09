@@ -5,6 +5,7 @@ import android.util.Base64
 import androidx.documentfile.provider.DocumentFile
 import com.facebook.react.bridge.*
 import java.io.ByteArrayInputStream
+import java.io.File
 import java.io.FileInputStream
 import java.io.InputStream
 import java.net.URLDecoder
@@ -64,6 +65,36 @@ class SafScannerModule(context: ReactApplicationContext) : ReactContextBaseJavaM
       if (bytes == null) throw Exception("EPUB 页面不存在")
       promise.resolve(Base64.encodeToString(bytes!!, Base64.NO_WRAP))
     } catch (error: Exception) { promise.reject("EPUB_ENTRY_FAILED", error.message, error) }
+  }
+
+  @ReactMethod
+  fun extractEpubEntries(uri: String, entries: ReadableArray, targetDirUri: String, fileNames: ReadableArray, promise: Promise) {
+    try {
+      val wanted = mutableMapOf<String, String>()
+      val count = minOf(entries.size(), fileNames.size())
+      for (index in 0 until count) {
+        val entry = entries.getString(index) ?: continue
+        val fileName = fileNames.getString(index) ?: continue
+        wanted[normalizePath(entry)] = fileName
+      }
+      val directory = File(Uri.parse(targetDirUri).path ?: throw Exception("无效的缓存目录"))
+      if (!directory.exists() && !directory.mkdirs()) throw Exception("无法创建页面缓存目录")
+      val written = Arguments.createArray()
+      openInput(uri).use { input ->
+        ZipInputStream(input).use { zip ->
+          while (true) {
+            val entry = zip.nextEntry ?: break
+            val fileName = if (!entry.isDirectory) wanted[normalizePath(entry.name)] else null
+            if (fileName != null) {
+              File(directory, fileName).outputStream().use { output -> zip.copyTo(output) }
+              written.pushString(fileName)
+            }
+            zip.closeEntry()
+          }
+        }
+      }
+      promise.resolve(written)
+    } catch (error: Exception) { promise.reject("EPUB_ENTRIES_FAILED", error.message, error) }
   }
 
   private data class EpubScan(val title: String, val author: String, val direction: String, val pages: List<String>)
