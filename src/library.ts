@@ -100,6 +100,7 @@ export async function listSeries(): Promise<LibrarySeries[]> {
     (SELECT chapter_number FROM chapters current_chapter WHERE current_chapter.id = s.current_chapter_id) AS current_chapter_number
     FROM series s LEFT JOIN chapters c ON c.series_id = s.id GROUP BY s.id ORDER BY s.updated_at DESC`);
   for (const row of rows) {
+    await restoreSeriesCover(row, db);
     if (row.author) continue;
     const firstChapter = await db.getFirstAsync<any>('SELECT local_uri, original_name, format FROM chapters WHERE series_id = ? ORDER BY chapter_number, original_name LIMIT 1', row.id);
     if (!firstChapter) continue;
@@ -142,7 +143,38 @@ export async function clearSeriesHistory(seriesId: number) {
 }
 
 export async function setSeriesCover(seriesId: number, coverUri: string) {
-  const db = await getDatabase(); await db.runAsync('UPDATE series SET cover_uri = ?, updated_at = ? WHERE id = ?', coverUri, Date.now(), seriesId);
+  const db = await getDatabase();
+  const persistentUri = await persistCoverUri(seriesId, coverUri);
+  await db.runAsync('UPDATE series SET cover_uri = ?, updated_at = ? WHERE id = ?', persistentUri, Date.now(), seriesId);
+  return persistentUri;
+}
+
+async function persistCoverUri(seriesId: number, coverUri: string) {
+  const root = `${FileSystem.documentDirectory}covers/`;
+  if (coverUri.startsWith(root)) return coverUri;
+  await FileSystem.makeDirectoryAsync(root, { intermediates: true });
+  const extension = coverUri.split('?')[0]?.split('.').pop()?.replace(/[^a-z0-9]/gi, '').toLowerCase() || 'jpg';
+  const target = `${root}series-${seriesId}-${Date.now()}.${extension}`;
+  await FileSystem.copyAsync({ from: coverUri, to: target });
+  return target;
+}
+
+async function restoreSeriesCover(row: any, db: SQLite.SQLiteDatabase) {
+  const first = await db.getFirstAsync<any>('SELECT local_uri, format FROM chapters WHERE series_id = ? ORDER BY chapter_number, original_name LIMIT 1', row.id);
+  if (!first || first.format !== 'epub') return;
+  if (row.cover_uri) {
+    try {
+      const info = await FileSystem.getInfoAsync(row.cover_uri);
+      if (info.exists) return;
+    } catch { /* Regenerate a missing cover below. */ }
+  }
+  try {
+    const firstPage = await epubFirstPageUri(first.local_uri, row.id);
+    if (!firstPage) return;
+    const coverUri = await persistCoverUri(row.id, firstPage);
+    row.cover_uri = coverUri;
+    await db.runAsync('UPDATE series SET cover_uri = ?, updated_at = ? WHERE id = ?', coverUri, Date.now(), row.id);
+  } catch { /* A source may be temporarily unavailable; keep the library usable. */ }
 }
 
 export async function chooseSeriesCover(seriesId: number): Promise<string | null> {

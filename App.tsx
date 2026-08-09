@@ -218,7 +218,7 @@ function AppContent() {
   const [series, setSeries] = useState<LibrarySeries[]>([]); const [selectedSeries, setSelectedSeries] = useState<LibrarySeries>(); const [seriesChapters, setSeriesChapters] = useState<StoredChapter[]>([]);
   const refreshBooks = async () => { setSeries(await listSeries()); };
   useEffect(() => { initializeLibrary().then(refreshBooks).catch(console.warn); }, []);
-  const goBack = () => { if (screen === 'document') refreshBooks().catch(console.warn); setScreen(screen === 'document' ? 'seriesDetail' : 'main'); };
+  const goBack = async () => { const currentScreen = screen; if (currentScreen === 'document') { const updated = await listSeries(); setSeries(updated); if (selectedSeries) { const next = updated.find(item => item.id === selectedSeries.id); if (next) { setSelectedSeries(next); setSeriesChapters(await listChapters(next.id)); } } } setScreen(currentScreen === 'document' ? 'seriesDetail' : 'main'); };
   useEffect(() => { const subscription = BackHandler.addEventListener('hardwareBackPress', () => { if (screen === 'main') return false; goBack(); return true; }); return () => subscription.remove(); }, [screen]);
   const configureRoot = async () => { setImporting(true); try { await configureLibraryRoot(); await refreshBooks(); } finally { setImporting(false); } };
   const refreshLibraries = async () => { setImporting(true); try { await refreshAllLibraries(); await refreshBooks(); } finally { setImporting(false); } };
@@ -267,9 +267,9 @@ const layoutStyles = StyleSheet.create({
   compactProgressFill: { height: '100%', borderRadius: 3 },
   bookTitleTight: { marginTop: 10, lineHeight: 19 },
   bookMetaTight: { marginTop: 2, marginBottom: 4, lineHeight: 15 },
-  cacheLabel: { lineHeight: 20 },
+  cacheLabel: { fontSize: 15, lineHeight: 22, fontWeight: '700' },
   cacheHint: { lineHeight: 17 },
   cacheInputCentered: { textAlign: 'center' },
-  sourceCardInset: { marginRight: 6 },
-  sourceDeleteInset: { right: 0, top: 0, bottom: 0, width: 72 },
+  sourceCardInset: { marginRight: 6, marginBottom: 0 },
+  sourceDeleteInset: { right: 0, top: 0, bottom: 0, width: 60 },
 });

@@ -62,7 +62,7 @@ export async function setPageCacheLimitMb(value: number) {
 export async function trimCacheToLimit(limitMb?: number) {
   if (!FileSystem.cacheDirectory) return;
   const limit = (limitMb ?? await getPageCacheLimitMb()) * 1024 ** 2;
-  const files = (await listFiles(FileSystem.cacheDirectory)).sort((a, b) => a.modified - b.modified);
+  const files = (await listPageCacheFiles()).sort((a, b) => a.modified - b.modified);
   let total = files.reduce((sum, file) => sum + file.size, 0);
   for (const file of files) {
     if (total <= limit) break;
@@ -71,11 +71,25 @@ export async function trimCacheToLimit(limitMb?: number) {
 }
 
 export async function clearAppCache() {
-  if (!FileSystem.cacheDirectory) return;
+  const pageRoot = FileSystem.cacheDirectory ? `${FileSystem.cacheDirectory}epub-pages/` : null;
+  if (!pageRoot) return;
   let children: string[];
-  try { children = await FileSystem.readDirectoryAsync(FileSystem.cacheDirectory); } catch { return; }
+  try { children = await FileSystem.readDirectoryAsync(pageRoot); } catch { return; }
   await Promise.all(children.map(child => {
-    const uri = child.startsWith('file://') || child.startsWith('content://') ? child : `${FileSystem.cacheDirectory!.endsWith('/') ? FileSystem.cacheDirectory : `${FileSystem.cacheDirectory}/`}${child}`;
+    const name = child.split('/').filter(Boolean).pop() ?? child;
+    if (name.startsWith('cover-')) return Promise.resolve();
+    const uri = child.startsWith('file://') || child.startsWith('content://') ? child : `${pageRoot}${child}`;
     return FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => undefined);
   }));
+}
+
+async function listPageCacheFiles() {
+  if (!FileSystem.cacheDirectory) return [] as CacheFile[];
+  const pageRoot = `${FileSystem.cacheDirectory}epub-pages/`;
+  const files = await listFiles(pageRoot);
+  return files.filter(file => {
+    const relative = file.uri.startsWith(pageRoot) ? file.uri.slice(pageRoot.length) : file.uri;
+    const firstSegment = relative.split('/').filter(Boolean)[0] ?? '';
+    return Boolean(firstSegment) && !firstSegment.startsWith('cover-');
+  });
 }
