@@ -61,8 +61,10 @@ export async function loadMobiComic(book: StoredBook, sessionId: string): Promis
     const fingerprint = `${book.localUri}:${records.length}:${String(result?.title ?? '')}`;
     mobiSessions.set(sessionId, { sourceUri: book.localUri, records, fingerprint, native: true });
     while (mobiSessions.size > 4) mobiSessions.delete(mobiSessions.keys().next().value as string);
+    const nativeTitle = String(result?.title ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim();
+    const title = /[A-Za-z0-9\u3400-\u9fff\u3040-\u30ff]/.test(nativeTitle) ? nativeTitle : book.title;
     return {
-      title: String(result?.title || book.title),
+      title,
       author: String(result?.author || book.author || ''),
       direction: 'ltr',
       pages: records.map((record, index) => ({ index, imageUri: MOBI_ENTRY_PREFIX + record })),
