@@ -11,15 +11,15 @@ Veader 是一个面向 Android / iOS 的本地优先漫画阅读器，目前处�
 - 以源文件 URI 作为权威数据；EPUB 只在打开时解压到缓存目录，不复制整套漫画到应用私有库。
 - 书架、最近阅读、系列目录、开始阅读 / 继续阅读和真实阅读进度。
 - EPUB 漫画分页阅读、点击区域翻页、左右/从上到下阅读方向、单页/双页/拆分双页、奇偶页顺序、阅读背景切换、自动白边裁切、进度拖动、音量键翻页和章节目录入口。
-- Android 使用 `PdfRenderer` 在应用内逐页渲染 PDF；MOBI 使用本地 PalmDOC 解析器生成可分页阅读内容，不把原文件整体复制到应用库。
-- Android 的 FTP / SMB2/3 漫画源可以真实扫描和按需下载；账号密码由 Android Keystore 加密保存，不写入 SQLite。
+- Android 使用 `PdfRenderer` 在应用内逐页渲染 PDF；MOBI 使用本地 PalmDOC 解析器生成 HTML 阅读内容，不把原文件复制到应用库。
+- Android 的 FTP / SMB2/3 漫画源可以真实扫描和下载；账号密码由 Android Keystore 加密保存，不写入 SQLite。
 - Android 原生 SAF 扫描器，用于处理 Android 14 下的嵌套目录。
 
 以下部分仍属于开发中：
 
 - iOS 已加入系统文件夹选择桥接，仍需在 macOS / Xcode 上做安全作用域书签和 PDF 原生渲染的端到端验证；当前 iOS PDF 会回退到 WebView。
 - 自动白边裁切和 PDF 原生渲染目前是 Android 原生实现，iOS 会保留原图或使用系统回退路径。
-- SMB / FTP 远程源的 Android 刷新会把远程文件按需下载到受上限管理的远程缓存；原始文件不会被移动或重命名。
+- SMB / FTP 远程源的 Android 刷新会把扫描到的章节下载到 `remote-books` 缓存；原始文件不会被移动或重命名，清理漫画页面缓存不会删除远程源缓存。
 
 ## 开发环境
 
