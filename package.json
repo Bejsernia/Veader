@@ -11,7 +11,10 @@
     "build:apk": "powershell -ExecutionPolicy Bypass -File scripts/build-android.ps1",
     "build:apk:cloud": "eas build --platform android --profile preview",
     "build:aab": "eas build --platform android --profile production",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "jest --runInBand",
+    "test:reader": "jest src/reader --runInBand",
+    "test:database": "jest src/data src/domain --runInBand"
   },
   "dependencies": {
     "@expo/vector-icons": "14.0.3",
@@ -34,8 +37,10 @@
     "veader-folder-picker": "file:./modules/veader-folder-picker"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/react": "~18.2.79",
     "eas-cli": "^21.7.0",
+    "jest-expo": "~51.0.0",
     "typescript": "~5.3.3"
   }
 }

@@ -1,10 +1,11 @@
 import * as FileSystem from 'expo-file-system';
 import JSZip from 'jszip';
 import { XMLParser } from 'fast-xml-parser';
-import { NativeModules, Platform } from 'react-native';
+import { Platform } from 'react-native';
 import type { StoredBook } from './library';
 import { epubEntryFromUri, extractEpubPage, isEpubEntryUri, normalizePath, scanEpub } from './epub-native';
 import { trimCacheToLimit } from './cache';
+import { getDocumentReader } from './platform/nativeContracts';
 
 export type RenderableContent =
   | { kind: 'html'; html: string }
@@ -53,10 +54,11 @@ export async function loadPdfPage(book: StoredBook, page: EpubComicPage, targetW
 }
 
 export async function loadMobiComic(book: StoredBook, sessionId: string): Promise<EpubComic> {
-  const native = (NativeModules as any).DocumentReader;
-  if (Platform.OS === 'android' && native?.getMobiInfo && native?.renderMobiPage) {
-    const result = await native.getMobiInfo(book.localUri);
-    const records: number[] = Array.isArray(result?.imageRecords) ? (result.imageRecords as unknown[]).map((value: unknown) => Number(value)).filter((value: number) => Number.isFinite(value)) : [];
+  const native = getDocumentReader();
+  if (Platform.OS === 'android' && native?.getInfo && native?.renderPage) {
+    const result = await native.getInfo(book.localUri, 'mobi');
+    const imageRecords = 'imageRecords' in result ? result.imageRecords : undefined;
+    const records: number[] = Array.isArray(imageRecords) ? imageRecords.map((value: unknown) => Number(value)).filter((value: number) => Number.isFinite(value)) : [];
     if (!records.length) throw new Error('MOBI 中没有找到漫画图片');
     const fingerprint = `${book.localUri}:${records.length}:${String(result?.title ?? '')}`;
     mobiSessions.set(sessionId, { sourceUri: book.localUri, records, fingerprint, native: true });
@@ -91,9 +93,9 @@ export async function loadMobiPage(book: StoredBook, page: EpubComicPage, sessio
   }
   if (!session) throw new Error('MOBI 阅读会话已失效');
   const recordIndex = Number(page.imageUri.slice(MOBI_ENTRY_PREFIX.length));
-  const native = (NativeModules as any).DocumentReader;
-  if (session.native && Platform.OS === 'android' && native?.renderMobiPage) {
-    return String(await native.renderMobiPage(book.localUri, recordIndex, 1600));
+  const native = getDocumentReader();
+  if (session.native && Platform.OS === 'android' && native?.renderPage) {
+    return String(await native.renderPage({ uri: book.localUri, format: 'mobi', pageIndex: recordIndex, targetWidth: 1600, sessionId }));
   }
   if (!session.bytes) throw new Error('MOBI 阅读会话没有可用数据');
   const recordStart = readU32(session.bytes, 78 + recordIndex * 8);
@@ -124,24 +126,24 @@ export function clearEpubComicCache() {
 }
 
 export async function getPdfPageCount(uri: string) {
-  const native = (NativeModules as any).DocumentReader;
-  if (Platform.OS === 'android' && native?.getPdfInfo) {
-    const result = await native.getPdfInfo(uri);
+  const native = getDocumentReader();
+  if (native?.getInfo) {
+    const result = await native.getInfo(uri, 'pdf');
     return Math.max(0, Number(result?.pageCount ?? 0));
   }
   throw new Error('当前平台没有可用的 PDF 原生阅读器');
 }
 
 export async function renderPdfPage(uri: string, pageIndex: number, targetWidth: number) {
-  const native = (NativeModules as any).DocumentReader;
-  if (Platform.OS === 'android' && native?.renderPdfPage) {
-    return String(await native.renderPdfPage(uri, pageIndex, Math.round(targetWidth)));
+  const native = getDocumentReader();
+  if (native?.renderPage) {
+    return String(await native.renderPage({ uri, format: 'pdf', pageIndex, targetWidth: Math.round(targetWidth) }));
   }
   throw new Error('当前平台没有可用的 PDF 原生阅读器');
 }
 
 export async function cropPageImage(uri: string) {
-  const native = (NativeModules as any).DocumentReader;
+  const native = getDocumentReader();
   if (Platform.OS === 'android' && native?.cropImage) {
     return String(await native.cropImage(uri));
   }

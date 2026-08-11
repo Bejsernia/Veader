@@ -2,8 +2,9 @@ import * as FileSystem from 'expo-file-system';
 
 const settingsUri = () => `${FileSystem.documentDirectory}veader-settings.json`;
 const DEFAULT_LIMIT_MB = 512;
+const DEFAULT_SOURCE_LIMIT_MB = 2048;
 
-type CacheSettings = { pageCacheLimitMb?: number };
+type CacheSettings = { pageCacheLimitMb?: number; sourceCacheLimitMb?: number };
 type CacheFile = { uri: string; size: number; modified: number };
 
 async function readSettings(): Promise<CacheSettings> {
@@ -48,6 +49,45 @@ export async function getCacheSizeBytes() {
   return files.reduce((sum, file) => sum + file.size, 0);
 }
 
+export async function getPageCacheSizeBytes() {
+  return getCacheSizeBytes();
+}
+
+export async function getSourceCacheSizeBytes() {
+  if (!FileSystem.cacheDirectory) return 0;
+  const files = await listFiles(`${FileSystem.cacheDirectory}remote-books/`);
+  return files.reduce((sum, file) => sum + file.size, 0);
+}
+
+export async function getSourceCacheLimitMb() {
+  const settings = await readSettings();
+  return Math.max(128, Math.min(8192, Math.round(settings.sourceCacheLimitMb ?? DEFAULT_SOURCE_LIMIT_MB)));
+}
+
+export async function setSourceCacheLimitMb(value: number) {
+  const sourceCacheLimitMb = Math.max(128, Math.min(8192, Math.round(value)));
+  const settings = await readSettings();
+  await writeSettings({ ...settings, sourceCacheLimitMb });
+  await trimSourceCacheToLimit(sourceCacheLimitMb);
+  return sourceCacheLimitMb;
+}
+
+export async function trimSourceCacheToLimit(limitMb?: number) {
+  if (!FileSystem.cacheDirectory) return;
+  const limit = (limitMb ?? await getSourceCacheLimitMb()) * 1024 ** 2;
+  const files = (await listFiles(FileSystem.cacheDirectory + 'remote-books/')).sort((a, b) => a.modified - b.modified);
+  let total = files.reduce((sum, file) => sum + file.size, 0);
+  for (const file of files) {
+    if (total <= limit) break;
+    try { await FileSystem.deleteAsync(file.uri, { idempotent: true }); total -= file.size; } catch { /* Ignore a file that is currently in use. */ }
+  }
+}
+
+export async function getCacheBreakdown() {
+  const [page, source] = await Promise.all([getPageCacheSizeBytes(), getSourceCacheSizeBytes()]);
+  return { page, source, total: page + source };
+}
+
 export async function getPageCacheLimitMb() {
   const settings = await readSettings();
   return Math.max(16, Math.min(4096, Math.round(settings.pageCacheLimitMb ?? DEFAULT_LIMIT_MB)));
@@ -72,7 +112,7 @@ export async function trimCacheToLimit(limitMb?: number) {
   }
 }
 
-export async function clearAppCache() {
+export async function clearPageCache() {
   if (!FileSystem.cacheDirectory) return;
   const roots = ['pdf-pages', 'mobi-pages', 'mobi-pages-native', 'cropped-pages'];
   await Promise.all(roots.map(root => FileSystem.deleteAsync(`${FileSystem.cacheDirectory}${root}/`, { idempotent: true }).catch(() => undefined)));
@@ -81,6 +121,24 @@ export async function clearAppCache() {
     const children = await FileSystem.readDirectoryAsync(epubRoot);
     await Promise.all(children.filter(child => !child.split('/').filter(Boolean).pop()?.startsWith('cover-')).map(child => FileSystem.deleteAsync(child.startsWith('file://') ? child : `${epubRoot}${child}`, { idempotent: true }).catch(() => undefined)));
   } catch { /* The page cache may not exist yet. */ }
+}
+
+export async function clearSourceCache() {
+  if (!FileSystem.cacheDirectory) return;
+  await FileSystem.deleteAsync(`${FileSystem.cacheDirectory}remote-books/`, { idempotent: true });
+}
+
+export async function clearSessionCache() {
+  if (!FileSystem.cacheDirectory) return;
+  await Promise.all([
+    FileSystem.deleteAsync(`${FileSystem.cacheDirectory}epub-archives/`, { idempotent: true }),
+    FileSystem.deleteAsync(`${FileSystem.cacheDirectory}epub-pages/`, { idempotent: true }),
+  ]);
+}
+
+/** Backwards-compatible alias for the old page-cache action. */
+export async function clearAppCache() {
+  return clearPageCache();
 }
 
 async function listPageCacheFiles() {

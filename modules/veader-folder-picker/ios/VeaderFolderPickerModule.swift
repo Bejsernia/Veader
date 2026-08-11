@@ -33,9 +33,8 @@ public class VeaderFolderPickerModule: Module {
       do {
         var stale = false
         let folder = try URL(resolvingBookmarkData: bookmark, options: [.withoutUI, .withoutMounting], relativeTo: nil, bookmarkDataIsStale: &stale)
-        let accessed = folder.startAccessingSecurityScopedResource()
+        SecurityScopedFolders.begin(key: directoryUri, url: folder)
         let result = enumerateFolder(folder)
-        if accessed { activeSecurityScopedFolders.append(folder) }
         if stale, let refreshed = try? folder.bookmarkData(options: .suitableForBookmarkFile, includingResourceValuesForKeys: nil, relativeTo: nil) {
           UserDefaults.standard.set(refreshed, forKey: "veader.folder.bookmark.\(directoryUri)")
         }
@@ -43,6 +42,11 @@ public class VeaderFolderPickerModule: Module {
       } catch {
         promise.reject("FOLDER_REFRESH_FAILED", error.localizedDescription, error)
       }
+    }
+
+    AsyncFunction("releaseFolder") { (directoryUri: String, promise: Promise) in
+      SecurityScopedFolders.end(key: directoryUri)
+      promise.resolve(nil)
     }
   }
 
@@ -54,7 +58,20 @@ public class VeaderFolderPickerModule: Module {
   }
 }
 
-private var activeSecurityScopedFolders: [URL] = []
+private enum SecurityScopedFolders {
+  private static var active: [String: URL] = [:]
+
+  static func begin(key: String, url: URL) {
+    if active[key] == nil && url.startAccessingSecurityScopedResource() {
+      active[key] = url
+    }
+  }
+
+  static func end(key: String) {
+    guard let url = active.removeValue(forKey: key) else { return }
+    url.stopAccessingSecurityScopedResource()
+  }
+}
 
 private final class FolderPickerDelegate: NSObject, UIDocumentPickerDelegate {
   private let completion: ([String: Any]?) -> Void
@@ -62,7 +79,7 @@ private final class FolderPickerDelegate: NSObject, UIDocumentPickerDelegate {
 
   func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
     guard let folder = urls.first else { completion(nil); return }
-    let accessed = folder.startAccessingSecurityScopedResource()
+    SecurityScopedFolders.begin(key: folder.absoluteString, url: folder)
     if let bookmark = try? folder.bookmarkData(options: .suitableForBookmarkFile, includingResourceValuesForKeys: nil, relativeTo: nil) {
       UserDefaults.standard.set(bookmark, forKey: "veader.folder.bookmark.\(folder.absoluteString)")
     }
@@ -75,7 +92,6 @@ private final class FolderPickerDelegate: NSObject, UIDocumentPickerDelegate {
         files.append(["name": file.lastPathComponent, "path": relativePath, "uri": file.absoluteString, "size": values?.fileSize ?? 0])
       }
     }
-    if accessed { activeSecurityScopedFolders.append(folder) }
     completion(["directoryUri": folder.absoluteString, "files": files])
   }
 

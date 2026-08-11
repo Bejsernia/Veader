@@ -1,8 +1,9 @@
 import * as FileSystem from 'expo-file-system';
 import { XMLParser } from 'fast-xml-parser';
 import JSZip from 'jszip';
-import { NativeModules, Platform } from 'react-native';
+import { Platform } from 'react-native';
 import { trimCacheToLimit } from './cache';
+import { getSafScanner } from './platform/nativeContracts';
 
 export type ScannedEpub = {
   title: string;
@@ -116,7 +117,7 @@ async function flushPageQueue(queueKey: string) {
     if (missing.length) {
       if (cancelledSessions.has(sessionId)) throw new Error('Reader session closed');
       await FileSystem.makeDirectoryAsync(targetDir, { intermediates: true });
-      const scanner = (NativeModules as any).SafScanner;
+      const scanner = getSafScanner();
       if (Platform.OS === 'android' && scanner?.prepareEpubSession && scanner?.extractEpubEntriesFromSession && sessionId.startsWith('reader-')) {
         let archive = archiveSessions.get(sessionId);
         if (!archive) {
@@ -152,7 +153,7 @@ async function flushPageQueue(queueKey: string) {
 export async function clearEpubSession(sessionId: string) {
   cancelledSessions.add(sessionId);
   sessionPageUris.delete(sessionId);
-  const scanner = (NativeModules as any).SafScanner;
+  const scanner = getSafScanner();
   archiveSessions.delete(sessionId);
   if (Platform.OS === 'android' && scanner?.releaseEpubSession && sessionId.startsWith('reader-')) {
     await scanner.releaseEpubSession(sessionId).catch(() => undefined);
@@ -182,7 +183,7 @@ export function epubEntryFromUri(value: string) {
 }
 
 async function scanEpubSource(sourceUri: string): Promise<ScannedEpub> {
-  const scanner = (NativeModules as any).SafScanner;
+  const scanner = getSafScanner();
   if (Platform.OS === 'android' && scanner?.scanEpub) {
     const result = await scanner.scanEpub(sourceUri);
     const pages = Array.isArray(result.pages) ? result.pages : [];

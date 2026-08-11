@@ -7,6 +7,9 @@ configurations.configureEach {
 }
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
+def reactNativeArchitectures = (findProperty('reactNativeArchitectures') ?: 'armeabi-v7a,arm64-v8a,x86,x86_64')
+    .split(',')
+    .collect { it.trim() }
 
 static def versionToNumber(major, minor, patch) {
   return patch * 100 + minor * 10000 + major * 1000000
@@ -120,6 +123,9 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "0.1.0"
+        ndk {
+            abiFilters.addAll(reactNativeArchitectures)
+        }
     }
     signingConfigs {
         debug {

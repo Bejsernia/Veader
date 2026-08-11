@@ -1,9 +1,12 @@
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import * as SQLite from 'expo-sqlite';
-import { NativeModules, Platform } from 'react-native';
+import { Platform } from 'react-native';
 import { XMLParser } from 'fast-xml-parser';
 import { epubEntryFromUri, extractEpubPage, scanEpub } from './epub-native';
+import { getDocumentReader, getFolderPicker, getSafScanner } from './platform/nativeContracts';
+import { createRemoteSourceAdapter } from './protocols';
+import { trimSourceCacheToLimit } from './cache';
 
 export type BookFormat = 'epub' | 'mobi' | 'pdf';
 
@@ -20,10 +23,19 @@ export type StoredBook = {
   currentLocation: string | null;
   addedAt: number;
   updatedAt: number;
+  sourceId?: number;
+  remotePath?: string;
+  remoteLocator?: string;
+  remoteSize?: number;
+  remoteModifiedAt?: number;
+  contentFingerprint?: string;
+  pageCount?: number;
+  scanStatus?: 'indexed' | 'cached' | 'ready' | 'error';
+  lastOpenedAt?: number;
 };
 
-export type StoredSource = { id: number; type: 'local' | 'smb' | 'ftp'; name: string; endpoint: string; enabled: boolean; bookCount: number; createdAt: number };
-export type LibrarySeries = { id: number; title: string; author: string; sourceUri: string; coverUri: string | null; progress: number; currentChapterId: number | null; currentChapterTitle: string | null; currentChapterNumber: number | null; chapterSearchText: string; chapterCount: number; updatedAt: number };
+export type StoredSource = { id: number; type: 'local' | 'smb' | 'ftp'; name: string; endpoint: string; enabled: boolean; bookCount: number; createdAt: number; updatedAt?: number };
+export type LibrarySeries = { id: number; title: string; author: string; sourceUri: string; sourceId?: number; coverUri: string | null; progress: number; currentChapterId: number | null; currentChapterTitle: string | null; currentChapterNumber: number | null; chapterSearchText: string; chapterCount: number; updatedAt: number };
 export type StoredChapter = StoredBook & { seriesId: number; chapterNumber: number; chapterTitle: string };
 
 let database: Promise<SQLite.SQLiteDatabase> | undefined;
@@ -44,6 +56,7 @@ export async function initializeLibrary() {
     PRAGMA foreign_keys = ON;
     CREATE TABLE IF NOT EXISTS series (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_id INTEGER,
       title TEXT NOT NULL,
       author TEXT NOT NULL DEFAULT '',
       source_uri TEXT NOT NULL UNIQUE,
@@ -56,14 +69,23 @@ export async function initializeLibrary() {
     CREATE TABLE IF NOT EXISTS chapters (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       series_id INTEGER NOT NULL REFERENCES series(id) ON DELETE CASCADE,
+      source_id INTEGER,
       chapter_number INTEGER NOT NULL,
       chapter_title TEXT NOT NULL,
       format TEXT NOT NULL CHECK(format IN ('epub','mobi','pdf')),
       local_uri TEXT NOT NULL UNIQUE,
       original_name TEXT NOT NULL,
       file_size INTEGER NOT NULL DEFAULT 0,
+      remote_path TEXT,
+      remote_locator TEXT,
+      remote_size INTEGER,
+      remote_modified_at INTEGER,
+      content_fingerprint TEXT,
+      page_count INTEGER,
+      scan_status TEXT NOT NULL DEFAULT 'ready',
       progress REAL NOT NULL DEFAULT 0,
       current_location TEXT,
+      last_opened_at INTEGER,
       added_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -76,10 +98,44 @@ export async function initializeLibrary() {
       username TEXT,
       secret_key TEXT,
       enabled INTEGER NOT NULL DEFAULT 1,
-      created_at INTEGER NOT NULL
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS schema_meta (
+      name TEXT PRIMARY KEY NOT NULL,
+      version INTEGER NOT NULL
     );
   `);
-  try { await db.execAsync('ALTER TABLE sources ADD COLUMN book_count INTEGER NOT NULL DEFAULT 0'); } catch { /* Column already exists. */ }
+  for (const statement of [
+    'ALTER TABLE series ADD COLUMN source_id INTEGER',
+    'ALTER TABLE sources ADD COLUMN book_count INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE sources ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE chapters ADD COLUMN remote_locator TEXT',
+    'ALTER TABLE chapters ADD COLUMN page_count INTEGER',
+    'ALTER TABLE chapters ADD COLUMN last_opened_at INTEGER',
+  ]) {
+    try { await db.execAsync(statement); } catch { /* Existing installations already have the column. */ }
+  }
+  for (const statement of [
+    'ALTER TABLE chapters ADD COLUMN remote_path TEXT',
+    'ALTER TABLE chapters ADD COLUMN source_id INTEGER',
+    'ALTER TABLE chapters ADD COLUMN remote_size INTEGER',
+    'ALTER TABLE chapters ADD COLUMN remote_modified_at INTEGER',
+    'ALTER TABLE chapters ADD COLUMN content_fingerprint TEXT',
+    "ALTER TABLE chapters ADD COLUMN scan_status TEXT NOT NULL DEFAULT 'ready'",
+  ]) {
+    try { await db.execAsync(statement); } catch { /* Existing installations already have the column. */ }
+  }
+  // Create indexes only after the additive migrations above. On an existing
+  // database, creating an index that references a newly-added column before
+  // the ALTER TABLE statements would abort the whole initialization batch.
+  await db.execAsync('CREATE INDEX IF NOT EXISTS idx_chapters_remote ON chapters(source_id, remote_path, content_fingerprint)');
+  const schema = await db.getFirstAsync<{ version: number }>('SELECT version FROM schema_meta WHERE name = ?', 'library');
+  if (!schema) {
+    await db.runAsync('INSERT INTO schema_meta(name, version) VALUES(?, ?)', 'library', 2);
+  } else if (Number(schema.version) < 2) {
+    await db.runAsync('UPDATE schema_meta SET version = ? WHERE name = ?', 2, 'library');
+  }
 }
 
 export async function listSeries(options: { refreshMetadata?: boolean; fast?: boolean } = {}): Promise<LibrarySeries[]> {
@@ -102,7 +158,7 @@ export async function listSeries(options: { refreshMetadata?: boolean; fast?: bo
       }
     }));
   }
-  return rows.map(row => ({ id: row.id, title: row.title, author: row.author, sourceUri: row.source_uri, coverUri: row.cover_uri, currentChapterTitle: row.current_chapter_title, currentChapterNumber: row.current_chapter_number,
+  return rows.map(row => ({ id: row.id, title: row.title, author: row.author, sourceUri: row.source_uri, sourceId: row.source_id ?? undefined, coverUri: row.cover_uri, currentChapterTitle: row.current_chapter_title, currentChapterNumber: row.current_chapter_number,
     chapterSearchText: String(row.chapter_search ?? ''), progress: row.progress, currentChapterId: row.current_chapter_id, chapterCount: row.chapter_count, updatedAt: row.updated_at }));
 }
 
@@ -132,19 +188,32 @@ export async function listChapters(seriesId: number): Promise<StoredChapter[]> {
   const rows = await db.getAllAsync<any>('SELECT * FROM chapters WHERE series_id = ? ORDER BY chapter_number, original_name', seriesId);
   return rows.map(row => ({ id: row.id, seriesId: row.series_id, chapterNumber: row.chapter_number, chapterTitle: row.chapter_title,
     title: row.chapter_title, author: '', format: row.format, localUri: row.local_uri, originalName: row.original_name, fileSize: row.file_size,
-    coverUri: null, progress: row.progress, currentLocation: row.current_location, addedAt: row.added_at, updatedAt: row.updated_at }));
+    coverUri: null, progress: row.progress, currentLocation: row.current_location, addedAt: row.added_at, updatedAt: row.updated_at,
+    sourceId: row.remote_path ? Number(row.source_id ?? 0) || undefined : undefined, remotePath: row.remote_path ?? undefined,
+    remoteLocator: row.remote_locator ?? undefined, remoteSize: row.remote_size ?? undefined, remoteModifiedAt: row.remote_modified_at ?? undefined,
+    contentFingerprint: row.content_fingerprint ?? undefined, pageCount: row.page_count ?? undefined,
+    scanStatus: row.scan_status ?? undefined, lastOpenedAt: row.last_opened_at ?? undefined }));
 }
 
 export async function updateChapterProgress(chapter: StoredChapter, progress: number, location: string) {
   const db = await getDatabase(); const safe = Math.max(0, Math.min(1, progress)); const now = Date.now();
-  await db.runAsync('UPDATE chapters SET progress = ?, current_location = ?, updated_at = ? WHERE id = ?', safe, location, now, chapter.id);
-  await db.runAsync('UPDATE series SET progress = ?, current_chapter_id = ?, updated_at = ? WHERE id = ?', safe, chapter.id, now, chapter.seriesId);
+  await db.withTransactionAsync(async () => {
+    await db.runAsync('UPDATE chapters SET progress = ?, current_location = ?, last_opened_at = ?, updated_at = ? WHERE id = ?', safe, location, now, now, chapter.id);
+    await db.runAsync('UPDATE series SET progress = ?, current_chapter_id = ?, updated_at = ? WHERE id = ?', safe, chapter.id, now, chapter.seriesId);
+  });
 }
 
 export async function clearSeriesHistory(seriesId: number) {
   const db = await getDatabase(); const now = Date.now();
-  await db.runAsync('UPDATE chapters SET progress = 0, current_location = NULL, updated_at = ? WHERE series_id = ?', now, seriesId);
-  await db.runAsync('UPDATE series SET progress = 0, current_chapter_id = NULL, updated_at = ? WHERE id = ?', now, seriesId);
+  await db.withTransactionAsync(async () => {
+    await db.runAsync('UPDATE chapters SET progress = 0, current_location = NULL, last_opened_at = NULL, updated_at = ? WHERE series_id = ?', now, seriesId);
+    await db.runAsync('UPDATE series SET progress = 0, current_chapter_id = NULL, updated_at = ? WHERE id = ?', now, seriesId);
+  });
+}
+
+export async function recordChapterContentInfo(chapterId: number, pageCount: number, status: 'ready' | 'error' = 'ready') {
+  const db = await getDatabase();
+  await db.runAsync('UPDATE chapters SET page_count = ?, scan_status = ?, updated_at = ? WHERE id = ?', Math.max(0, Math.floor(pageCount)), status, Date.now(), chapterId);
 }
 
 export async function setSeriesCover(seriesId: number, coverUri: string) {
@@ -235,13 +304,13 @@ async function syncIosFolderSelection(selection: FolderSelection, sourceName?: s
 export async function configureLibraryRoot(): Promise<LibrarySeries[]> {
   await initializeLibrary();
   if (Platform.OS !== 'android') {
-    const picker = (NativeModules as any).VeaderFolderPicker;
+    const picker = getFolderPicker();
     if (!picker?.pickFolder) throw new Error('iOS 文件夹选择模块未安装，请使用文件导入或重新构建开发版');
     const selection = await picker.pickFolder() as { directoryUri: string; files: { name: string; uri: string; path?: string; size?: number }[] } | null;
     if (!selection?.directoryUri) return listSeries();
     return syncIosFolderSelection(selection);
   }
-  const scanner = (NativeModules as any).SafScanner;
+  const scanner = getSafScanner();
   if (!scanner?.scan) throw new Error('Android 文件扫描模块未加载，请重新安装当前 APK。');
   const permission = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
   if (!permission.granted) return [];
@@ -279,7 +348,7 @@ export async function configureLibraryRoot(): Promise<LibrarySeries[]> {
 export async function refreshAllLibraries(): Promise<LibrarySeries[]> {
   await initializeLibrary();
   if (Platform.OS !== 'android') {
-    const picker = (NativeModules as any).VeaderFolderPicker;
+    const picker = getFolderPicker();
     if (!picker?.refreshFolder) return listSeries();
     const sources = await listSources();
     for (const source of sources.filter(item => item.type === 'local' && item.enabled)) {
@@ -292,7 +361,7 @@ export async function refreshAllLibraries(): Promise<LibrarySeries[]> {
     }
     return listSeries({ refreshMetadata: true });
   }
-  const scanner = (NativeModules as any).SafScanner;
+  const scanner = getSafScanner();
   if (!scanner?.scan) throw new Error('Android 文件扫描模块未加载，请重新安装当前 APK。');
   const sources = await listSources();
   for (const source of sources.filter(item => item.type === 'local' && item.enabled)) {
@@ -338,13 +407,13 @@ export async function refreshAllLibraries(): Promise<LibrarySeries[]> {
       await saveSource('local', source.name, source.endpoint, seriesCount);
     } catch (error) { console.warn('漫画源刷新失败', source.endpoint, error); }
   }
-  if (Platform.OS === 'android') {
-    const remote = (NativeModules as any).RemoteSource;
+  {
     for (const source of sources.filter(item => (item.type === 'ftp' || item.type === 'smb') && item.enabled)) {
+      const adapter = createRemoteSourceAdapter(source.type as 'ftp' | 'smb');
       try {
-        if (!remote?.scan || !remote?.download) throw new Error('远程协议原生模块未安装');
-        const entries = await remote.scan(source.type, source.endpoint, undefined, undefined) as { name: string; path: string; size?: number; directory?: boolean }[];
-        const grouped = new Map<string, { name: string; path: string; size?: number }[]>();
+        await adapter.connect({ endpoint: source.endpoint });
+        const entries = await adapter.list('');
+        const grouped = new Map<string, { name: string; path: string; size?: number; modifiedAt?: number }[]>();
         for (const entry of entries) {
           if (entry.directory || !formatFromName(entry.name)) continue;
           const parts = entry.path.replace(/\\/g, '/').split('/').filter(Boolean);
@@ -359,16 +428,12 @@ export async function refreshAllLibraries(): Promise<LibrarySeries[]> {
           if (existing) await db.runAsync('UPDATE series SET title = ?, updated_at = ? WHERE id = ?', cleanSeriesTitle(seriesName), now, seriesId);
           let chapterNumber = 1;
           for (const entry of items.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))) {
-            const format = formatFromName(entry.name)!; const target = await remoteCacheTarget(source.id, entry.path, format);
-            const info = await FileSystem.getInfoAsync(target, { size: true });
-            if (!info.exists || (entry.size !== undefined && Number((info as any).size ?? -1) !== Number(entry.size))) {
-              await remote.download(source.type, source.endpoint, entry.path, undefined, undefined, target);
-            }
-            seenChapterUris.add(target);
-            await importChapter(target, entry.name, format, seriesId, chapterNumber++);
+            const format = formatFromName(entry.name)!;
+            const locator = remoteChapterLocator(source.id, entry.path);
+            seenChapterUris.add(locator);
+            await importRemoteChapter(source, locator, entry, format, seriesId, chapterNumber++);
           }
           seriesCount++;
-        if (!existing?.cover_uri) { const first = await db.getFirstAsync<any>('SELECT local_uri FROM chapters WHERE series_id = ? ORDER BY chapter_number LIMIT 1', seriesId); if (first) { const firstFormat = formatFromName(first.local_uri); if (firstFormat) { const cover = await firstPageUri(first.local_uri, firstFormat, seriesId); if (cover) await setSeriesCover(seriesId, cover); } } }
         }
         const oldChapters = await db.getAllAsync<any>('SELECT c.id, c.local_uri, s.source_uri FROM chapters c JOIN series s ON s.id = c.series_id');
         for (const item of oldChapters) if (typeof item.source_uri === 'string' && item.source_uri.startsWith(`${source.endpoint}#series=`) && !seenChapterUris.has(item.local_uri)) await db.runAsync('DELETE FROM chapters WHERE id = ?', item.id);
@@ -376,14 +441,82 @@ export async function refreshAllLibraries(): Promise<LibrarySeries[]> {
         for (const item of oldSeries) if (typeof item.source_uri === 'string' && item.source_uri.startsWith(`${source.endpoint}#series=`) && !seenSeriesUris.has(item.source_uri)) await db.runAsync('DELETE FROM series WHERE id = ?', item.id);
         await saveSource(source.type, source.name, source.endpoint, seriesCount);
       } catch (error) { console.warn('远程漫画源刷新失败', source.endpoint, error); }
+      finally { await adapter.disconnect().catch(() => undefined); }
     }
   }
   return listSeries({ refreshMetadata: true });
 }
 
 async function remoteCacheTarget(sourceId: number, remotePath: string, format: BookFormat) {
-  const root = `${FileSystem.cacheDirectory}remote-books/`; await FileSystem.makeDirectoryAsync(root, { intermediates: true });
+  const cacheRoot = FileSystem.cacheDirectory;
+  if (!cacheRoot) throw new Error('应用缓存目录不可用');
+  const root = `${cacheRoot}remote-books/`; await FileSystem.makeDirectoryAsync(root, { intermediates: true });
   return `${root}${sourceId}-${encodeURIComponent(remotePath).replace(/%/g, '_')}.${format}`;
+}
+
+async function remoteCacheTargetForFingerprint(sourceId: number, remotePath: string, format: BookFormat, fingerprint: string) {
+  const base = await remoteCacheTarget(sourceId, remotePath, format);
+  const suffix = '.' + format;
+  const safeFingerprint = encodeURIComponent(fingerprint).replace(/%/g, '_');
+  return base.slice(0, -suffix.length) + '-' + safeFingerprint + suffix;
+}
+
+async function downloadWithAdapter(adapter: ReturnType<typeof createRemoteSourceAdapter>, endpoint: string, remotePath: string, localUri: string) {
+  await adapter.connect({ endpoint });
+  try {
+    return await adapter.download({ remotePath, localUri });
+  } finally {
+    await adapter.disconnect().catch(() => undefined);
+  }
+}
+
+function remoteChapterLocator(sourceId: number, remotePath: string) {
+  return `veader-remote://${sourceId}/${encodeURIComponent(remotePath.replace(/\\/g, '/'))}`;
+}
+
+async function importRemoteChapter(source: StoredSource, locator: string, entry: { name: string; path: string; size?: number; modifiedAt?: number }, format: BookFormat, seriesId: number, chapterNumber: number): Promise<StoredChapter> {
+  const db = await getDatabase();
+  const existing = await db.getFirstAsync<any>('SELECT * FROM chapters WHERE series_id = ? AND remote_path = ?', seriesId, entry.path);
+  const now = Date.now();
+  const title = entry.name.replace(/\.(epub|mobi|pdf)$/i, '');
+  const fingerprint = String(entry.size ?? 0) + ':' + String(entry.modifiedAt ?? 0);
+  if (existing) {
+    await db.runAsync("UPDATE chapters SET source_id = ?, chapter_number = ?, chapter_title = ?, format = ?, local_uri = ?, remote_locator = ?, remote_size = ?, remote_modified_at = ?, content_fingerprint = ?, scan_status = 'indexed', updated_at = ? WHERE id = ?", source.id, chapterNumber, title, format, locator, locator, entry.size ?? null, entry.modifiedAt ?? null, fingerprint, now, existing.id);
+    return (await listChapters(seriesId)).find(chapter => chapter.id === existing.id)!;
+  }
+  const result = await db.runAsync("INSERT INTO chapters(series_id, source_id, chapter_number, chapter_title, format, local_uri, remote_locator, remote_path, remote_size, remote_modified_at, content_fingerprint, scan_status, original_name, file_size, added_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'indexed', ?, 0, ?, ?)", seriesId, source.id, chapterNumber, title, format, locator, locator, entry.path, entry.size ?? null, entry.modifiedAt ?? null, fingerprint, entry.name, now, now);
+  return {
+    id: Number(result.lastInsertRowId), seriesId, chapterNumber, chapterTitle: title, title, author: '', format,
+    localUri: locator, originalName: entry.name, fileSize: 0, coverUri: null, progress: 0, currentLocation: null,
+    addedAt: now, updatedAt: now, sourceId: source.id, remotePath: entry.path, remoteLocator: locator, remoteSize: entry.size, remoteModifiedAt: entry.modifiedAt,
+    contentFingerprint: fingerprint, scanStatus: 'indexed',
+  };
+}
+
+export async function ensureChapterLocal(chapter: StoredChapter): Promise<StoredChapter> {
+  if (!chapter.remotePath || !chapter.sourceId) return chapter;
+  const db = await getDatabase();
+  const source = await db.getFirstAsync<any>('SELECT * FROM sources WHERE id = ?', chapter.sourceId);
+  if (!source || (source.type !== 'ftp' && source.type !== 'smb')) throw new Error('远程来源不存在');
+  const adapter = createRemoteSourceAdapter(source.type as 'ftp' | 'smb');
+  const fingerprint = chapter.contentFingerprint || String(chapter.remoteSize ?? 0) + ':' + String(chapter.remoteModifiedAt ?? 0);
+  const target = await remoteCacheTargetForFingerprint(chapter.sourceId, chapter.remotePath, chapter.format, fingerprint);
+  const info = await FileSystem.getInfoAsync(target, { size: true });
+  const validCache = info.exists && (chapter.remoteSize === undefined || Number((info as any).size ?? -1) === Number(chapter.remoteSize));
+  if (!validCache) {
+    const temporary = `${target}.part`;
+    await FileSystem.deleteAsync(temporary, { idempotent: true });
+    await downloadWithAdapter(adapter, source.endpoint, chapter.remotePath, temporary);
+    const downloaded = await FileSystem.getInfoAsync(temporary, { size: true });
+    if (!downloaded.exists || Number((downloaded as any).size ?? 0) <= 0) throw new Error('远程文件下载为空');
+    await FileSystem.deleteAsync(target, { idempotent: true });
+    await FileSystem.moveAsync({ from: temporary, to: target });
+    await trimSourceCacheToLimit();
+  }
+  const localInfo = await FileSystem.getInfoAsync(target, { size: true });
+  const fileSize = Number((localInfo as any).size ?? chapter.remoteSize ?? 0);
+  await db.runAsync("UPDATE chapters SET local_uri = ?, file_size = ?, content_fingerprint = ?, scan_status = 'cached', updated_at = ? WHERE id = ?", target, fileSize, fingerprint, Date.now(), chapter.id);
+  return { ...chapter, localUri: target, fileSize, contentFingerprint: fingerprint, scanStatus: 'cached' };
 }
 
 async function importChapter(uri: string, name: string, format: BookFormat, seriesId: number, chapterNumber: number): Promise<StoredChapter> {
@@ -415,8 +548,8 @@ async function epubFirstPageUri(uri: string, seriesId: number): Promise<string |
 
 async function firstPageUri(uri: string, format: BookFormat, seriesId: number): Promise<string | null> {
   if (format === 'epub') return epubFirstPageUri(uri, seriesId);
-  if (Platform.OS !== 'android') return null;
-  const native = (NativeModules as any).DocumentReader;
+  const native = getDocumentReader();
+  if (!native) return null;
   try {
     if (format === 'pdf' && native?.renderPdfPage) return String(await native.renderPdfPage(uri, 0, 720));
     if (format === 'mobi' && native?.getMobiInfo && native?.renderMobiPage) {
@@ -431,23 +564,24 @@ async function firstPageUri(uri: string, format: BookFormat, seriesId: number): 
 export async function listSources(): Promise<StoredSource[]> {
   const db = await getDatabase();
   const rows = await db.getAllAsync<any>('SELECT * FROM sources ORDER BY created_at DESC');
-  return rows.map(row => ({ id: row.id, type: row.type, name: row.name, endpoint: row.endpoint, enabled: Boolean(row.enabled), bookCount: row.book_count ?? 0, createdAt: row.created_at }));
+  return rows.map(row => ({ id: row.id, type: row.type, name: row.name, endpoint: row.endpoint, enabled: Boolean(row.enabled), bookCount: row.book_count ?? 0, createdAt: row.created_at, updatedAt: row.updated_at ?? row.created_at }));
 }
 
 export async function saveSource(type: StoredSource['type'], name: string, endpoint: string, bookCount = 0) {
   const db = await getDatabase();
   const existing = await db.getFirstAsync<any>('SELECT id FROM sources WHERE type = ? AND endpoint = ?', type, endpoint);
-  if (existing) await db.runAsync('UPDATE sources SET name = ?, book_count = ?, enabled = 1 WHERE id = ?', name, bookCount, existing.id);
-  else await db.runAsync('INSERT INTO sources(type, name, endpoint, enabled, book_count, created_at) VALUES(?, ?, ?, 1, ?, ?)', type, name, endpoint, bookCount, Date.now());
+  const now = Date.now();
+  if (existing) await db.runAsync('UPDATE sources SET name = ?, book_count = ?, enabled = 1, updated_at = ? WHERE id = ?', name, bookCount, now, existing.id);
+  else await db.runAsync('INSERT INTO sources(type, name, endpoint, enabled, book_count, created_at, updated_at) VALUES(?, ?, ?, 1, ?, ?, ?)', type, name, endpoint, bookCount, now, now);
 }
 
 export async function setSourceEnabled(id: number, enabled: boolean) {
-  const db = await getDatabase(); await db.runAsync('UPDATE sources SET enabled = ? WHERE id = ?', enabled ? 1 : 0, id);
+  const db = await getDatabase(); await db.runAsync('UPDATE sources SET enabled = ?, updated_at = ? WHERE id = ?', enabled ? 1 : 0, Date.now(), id);
 }
 
 export async function renameSource(id: number, name: string) {
   const db = await getDatabase();
-  await db.runAsync('UPDATE sources SET name = ? WHERE id = ?', name.trim(), id);
+  await db.runAsync('UPDATE sources SET name = ?, updated_at = ? WHERE id = ?', name.trim(), Date.now(), id);
 }
 
 export async function deleteSource(id: number) {
@@ -470,6 +604,7 @@ export async function deleteSource(id: number) {
       await Promise.all(files.filter(file => file.startsWith(`${id}-`)).map(file => FileSystem.deleteAsync(`${root}${file}`, { idempotent: true }).catch(() => undefined)));
     } catch { /* The remote source may not have downloaded anything. */ }
   }
+  if (source?.type === 'local' && Platform.OS === 'ios') await getFolderPicker()?.releaseFolder?.(source.endpoint);
   await db.runAsync('DELETE FROM sources WHERE id = ?', id);
 }
 
@@ -483,7 +618,7 @@ async function extractMetadata(uri: string, filename: string, format: BookFormat
   try {
     if (format === 'epub') return await readEpubMetadata(uri, fallback);
     if (format === 'mobi' && Platform.OS === 'android') {
-      const native = (NativeModules as any).DocumentReader;
+      const native = getDocumentReader();
       if (native?.getMobiInfo) {
         const result = await native.getMobiInfo(uri);
         return { title: String(result?.title || fallback.title), author: String(result?.author || fallback.author) };
