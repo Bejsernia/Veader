@@ -1,6 +1,5 @@
-import React, { useCallback, useState } from 'react';
+import React, { useState } from 'react';
 import { Pressable, PressableProps, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
-import * as Haptics from 'expo-haptics';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { motionSpring } from '../motion';
 import { useTheme } from '../theme';
@@ -14,24 +13,16 @@ type Props = Omit<PressableProps, 'style' | 'children'> & {
   scale?: number;
 };
 
-export function PressableScale({ haptic = 'light', scale = 0.97, onPressIn, onPressOut, style, disabled, children, ...props }: Props) {
+export function PressableScale({ haptic: _haptic = 'none', scale = 0.97, onPressIn, onPressOut, style, disabled, children, ...props }: Props) {
   const { reducedMotion } = useTheme();
+  // Keep the prop for source compatibility, but button interactions are intentionally silent.
+  void _haptic;
   const progress = useSharedValue(0);
   const [pressed, setPressed] = useState(false);
   const animatedStyle = useAnimatedStyle(() => ({
     opacity: disabled ? 0.48 : 1,
     transform: [{ scale: reducedMotion ? 1 : 1 - progress.value * (1 - scale) }],
   }), [disabled, reducedMotion, scale]);
-
-  const triggerHaptic = useCallback(() => {
-    if (haptic === 'none') return;
-    const task = haptic === 'medium'
-      ? Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
-      : haptic === 'selection'
-        ? Haptics.selectionAsync()
-        : Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    void task.catch(() => undefined);
-  }, [haptic]);
 
   const resolvedStyle = typeof style === 'function' ? style({ pressed }) : style;
   const flattenedStyle = StyleSheet.flatten(resolvedStyle) as ViewStyle | undefined;
@@ -46,7 +37,7 @@ export function PressableScale({ haptic = 'light', scale = 0.97, onPressIn, onPr
     <Pressable
       {...props}
       disabled={disabled}
-      onPressIn={event => { setPressed(true); progress.value = withSpring(1, motionSpring); triggerHaptic(); onPressIn?.(event); }}
+      onPressIn={event => { setPressed(true); progress.value = withSpring(1, motionSpring); onPressIn?.(event); }}
       onPressOut={event => { setPressed(false); progress.value = withSpring(0, motionSpring); onPressOut?.(event); }}
       style={[resolvedStyle, StyleSheet.absoluteFill, { backgroundColor: 'transparent' }]}
     />

@@ -74,8 +74,14 @@ export class PageLoader {
   }
 
   prefetchAround(index: number) {
-    const indexes = Array.from({ length: this.prefetchDistance }, (_, offset) => index + offset + 1);
-    this.prefetch(indexes);
+    if (this.disposed) return;
+    // Keep both directions warm. The reader can reveal either neighbor while
+    // the user drags, and nearest pages should enter the queue first.
+    for (let distance = 1; distance <= this.prefetchDistance; distance += 1) {
+      this.enqueue(index + distance, distance);
+      this.enqueue(index - distance, distance);
+    }
+    this.pump();
   }
 
   retry(index: number) {
@@ -122,7 +128,10 @@ export class PageLoader {
 
   private pump() {
     while (!this.disposed && this.active < this.concurrency && this.queue.size > 0) {
-      const next = [...this.queue.entries()].sort((a, b) => a[1] - b[1] || a[0] - b[0])[0];
+      // Map insertion order preserves the direction in which neighboring
+      // pages were scheduled. Do not sort equal-priority pages by index: that
+      // can put the previous page ahead of the page the user is moving toward.
+      const next = [...this.queue.entries()].sort((a, b) => a[1] - b[1])[0];
       if (!next) return;
       const [index] = next;
       this.queue.delete(index);

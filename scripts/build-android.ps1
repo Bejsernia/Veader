@@ -86,7 +86,7 @@ function Prepare-ReleaseJsBundle {
   $hermes = Join-Path $ProjectRoot 'node_modules\react-native\sdks\hermesc\win64-bin\hermesc.exe'
 
   Write-Host 'Preparing Android release JavaScript bundle directly (Windows Gradle workaround)...'
-  & $node $expoCli export:embed --platform android --dev false --reset-cache --entry-file 'node_modules\expo\AppEntry.js' --bundle-output $bundle --assets-dest $releaseResources --sourcemap-output $packagerMap --minify false --verbose
+  & $node $expoCli export:embed --platform android --dev false --reset-cache --max-workers 1 --entry-file 'node_modules\expo\AppEntry.js' --bundle-output $bundle --assets-dest $releaseResources --sourcemap-output $packagerMap --minify false --verbose
   if ($LASTEXITCODE -ne 0) { throw "Expo bundle failed with exit code $LASTEXITCODE" }
 
   $hermesOutput = "$bundle.hbc"

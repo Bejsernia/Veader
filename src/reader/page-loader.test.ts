@@ -23,6 +23,26 @@ describe('PageLoader', () => {
     loader.dispose();
   });
 
+  it('prefetches the nearest pages in both directions', async () => {
+    const calls: number[] = [];
+    const loader = new PageLoader({
+      pageCount: 7,
+      concurrency: 1,
+      prefetchDistance: 2,
+      loadPage: async index => {
+        calls.push(index);
+        return { index, uri: 'file:///page-' + index + '.jpg' };
+      },
+    });
+
+    await loader.load(3);
+    loader.prefetchAround(3);
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(calls).toEqual([3, 4, 2, 5, 1]);
+    loader.dispose();
+  });
+
   it('supports retry after a failed page load', async () => {
     let attempts = 0;
     const loader = new PageLoader({
