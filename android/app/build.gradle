@@ -7,6 +7,7 @@ configurations.configureEach {
 }
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
+def nodeExecutable = System.getenv('VEADER_NODE_EXECUTABLE') ?: 'node'
 def reactNativeArchitectures = (findProperty('reactNativeArchitectures') ?: 'armeabi-v7a,arm64-v8a,x86,x86_64')
     .split(',')
     .collect { it.trim() }
@@ -37,6 +38,7 @@ def rnVersion = getRNVersion()
  * By default you don't need to apply any configuration, just uncomment the lines you need.
  */
 react {
+    nodeExecutableAndArgs = [nodeExecutable]
     entryFile = file(["node", "-e", "require('expo/scripts/resolveAppEntry')", projectRoot, "android", "absolute"].execute(null, rootDir).text.trim())
     reactNativeDir = new File(["node", "--print", "require.resolve('react-native/package.json')"].execute(null, rootDir).text.trim()).getParentFile().getAbsoluteFile()
     hermesCommand = new File(["node", "--print", "require.resolve('react-native/package.json')"].execute(null, rootDir).text.trim()).getParentFile().getAbsolutePath() + "/sdks/hermesc/%OS-BIN%/hermesc"
@@ -214,4 +216,11 @@ dependencies {
 if (rnVersion < versionToNumber(0, 75, 0)) {
     apply from: new File(["node", "--print", "require.resolve('@react-native-community/cli-platform-android/package.json', { paths: [require.resolve('react-native/package.json')] })"].execute(null, rootDir).text.trim(), "../native_modules.gradle");
     applyNativeModulesAppBuildGradle(project)
+}
+
+// Expo SDK 51's export:embed works reliably when launched directly from PowerShell on
+// Windows, while Gradle's nested cmd.exe invocation can sporadically return ERROR_ACCESS_DENIED.
+// The build script can pre-generate the bundle and ask Gradle to consume those generated files.
+tasks.matching { it.name == "createBundleReleaseJsAndAssets" }.configureEach {
+    onlyIf { !project.hasProperty("veaderPrebuiltBundle") }
 }

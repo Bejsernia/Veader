@@ -76,17 +76,23 @@ export class NativeCapabilityError extends Error {
 export function getDocumentReader(): DocumentReaderModule | undefined {
   const native = NativeModules.DocumentReader as DocumentReaderModule | undefined;
   if (!native) return undefined;
+  const getInfo = native.getInfo ?? (async (uri: string, format?: BookFormat) => {
+    if (format === 'pdf' && native.getPdfInfo) return native.getPdfInfo(uri);
+    if (format === 'mobi' && native.getMobiInfo) return native.getMobiInfo(uri);
+    throw new NativeCapabilityError('METHOD_UNAVAILABLE', 'DocumentReader.getInfo 不可用', 'DocumentReader');
+  });
+  const renderPage = native.renderPage ?? (async (input: RenderPageInput) => {
+    if (input.format === 'pdf' && native.renderPdfPage) return native.renderPdfPage(input.uri, input.pageIndex, input.targetWidth);
+    if (input.format === 'mobi' && native.renderMobiPage) return native.renderMobiPage(input.uri, input.pageIndex, input.targetWidth);
+    throw new NativeCapabilityError('METHOD_UNAVAILABLE', 'DocumentReader.renderPage 不可用', 'DocumentReader');
+  });
   return {
     ...native,
-    getInfo: native.getInfo ?? (async (uri, format) => {
-      if (format === 'pdf' && native.getPdfInfo) return native.getPdfInfo(uri);
-      if (format === 'mobi' && native.getMobiInfo) return native.getMobiInfo(uri);
-      throw new NativeCapabilityError('METHOD_UNAVAILABLE', 'DocumentReader.getInfo 不可用', 'DocumentReader');
-    }),
-    renderPage: native.renderPage ?? (async input => {
-      if (input.format === 'pdf' && native.renderPdfPage) return native.renderPdfPage(input.uri, input.pageIndex, input.targetWidth);
-      if (input.format === 'mobi' && native.renderMobiPage) return native.renderMobiPage(input.uri, input.pageIndex, input.targetWidth);
-      throw new NativeCapabilityError('METHOD_UNAVAILABLE', 'DocumentReader.renderPage 不可用', 'DocumentReader');
+    getInfo,
+    renderPage,
+    openSession: native.openSession ?? (async input => input.sessionId),
+    prefetch: native.prefetch ?? (async input => {
+      await Promise.all(input.pageIndexes.map(pageIndex => renderPage({ ...input, pageIndex })));
     }),
     closeSession: native.closeSession ?? (async () => undefined),
   };

@@ -1,6 +1,61 @@
-import type { BookFormat, LibrarySeries, StoredChapter, StoredSource } from '../library';
+export type BookFormat = 'epub' | 'mobi' | 'pdf';
 
-export type { BookFormat, LibrarySeries, StoredChapter, StoredSource };
+export type StoredBook = {
+  id: number;
+  title: string;
+  author: string;
+  format: BookFormat;
+  localUri: string;
+  originalName: string;
+  fileSize: number;
+  coverUri: string | null;
+  progress: number;
+  currentLocation: string | null;
+  addedAt: number;
+  updatedAt: number;
+  sourceId?: number;
+  remotePath?: string;
+  remoteLocator?: string;
+  remoteSize?: number;
+  remoteModifiedAt?: number;
+  contentFingerprint?: string;
+  pageCount?: number;
+  scanStatus?: 'indexed' | 'cached' | 'ready' | 'error';
+  lastOpenedAt?: number;
+};
+
+export type StoredSource = {
+  id: number;
+  type: 'local' | 'smb' | 'ftp';
+  name: string;
+  endpoint: string;
+  enabled: boolean;
+  bookCount: number;
+  createdAt: number;
+  updatedAt?: number;
+};
+
+export type LibrarySeries = {
+  id: number;
+  title: string;
+  author: string;
+  sourceUri: string;
+  sourceId?: number;
+  coverUri: string | null;
+  progress: number;
+  currentChapterId: number | null;
+  currentChapterTitle: string | null;
+  currentChapterNumber: number | null;
+  chapterSearchText: string;
+  chapterCount: number;
+  updatedAt: number;
+};
+
+export type StoredChapter = StoredBook & {
+  seriesId: number;
+  chapterNumber: number;
+  chapterTitle: string;
+};
 
 export type LibraryQuery = {
   search?: string;

@@ -1,4 +1,5 @@
 import * as FileSystem from 'expo-file-system';
+import { selectLruFilesToTrim } from './data/cache-policy';
 
 const settingsUri = () => `${FileSystem.documentDirectory}veader-settings.json`;
 const DEFAULT_LIMIT_MB = 512;
@@ -75,11 +76,9 @@ export async function setSourceCacheLimitMb(value: number) {
 export async function trimSourceCacheToLimit(limitMb?: number) {
   if (!FileSystem.cacheDirectory) return;
   const limit = (limitMb ?? await getSourceCacheLimitMb()) * 1024 ** 2;
-  const files = (await listFiles(FileSystem.cacheDirectory + 'remote-books/')).sort((a, b) => a.modified - b.modified);
-  let total = files.reduce((sum, file) => sum + file.size, 0);
-  for (const file of files) {
-    if (total <= limit) break;
-    try { await FileSystem.deleteAsync(file.uri, { idempotent: true }); total -= file.size; } catch { /* Ignore a file that is currently in use. */ }
+  const files = await listFiles(FileSystem.cacheDirectory + 'remote-books/');
+  for (const file of selectLruFilesToTrim(files, limit)) {
+    try { await FileSystem.deleteAsync(file.uri, { idempotent: true }); } catch { /* Ignore a file that is currently in use. */ }
   }
 }
 
@@ -104,11 +103,9 @@ export async function setPageCacheLimitMb(value: number) {
 export async function trimCacheToLimit(limitMb?: number) {
   if (!FileSystem.cacheDirectory) return;
   const limit = (limitMb ?? await getPageCacheLimitMb()) * 1024 ** 2;
-  const files = (await listPageCacheFiles()).sort((a, b) => a.modified - b.modified);
-  let total = files.reduce((sum, file) => sum + file.size, 0);
-  for (const file of files) {
-    if (total <= limit) break;
-    try { await FileSystem.deleteAsync(file.uri, { idempotent: true }); total -= file.size; } catch { /* Ignore a file that is currently in use. */ }
+  const files = await listPageCacheFiles();
+  for (const file of selectLruFilesToTrim(files, limit)) {
+    try { await FileSystem.deleteAsync(file.uri, { idempotent: true }); } catch { /* Ignore a file that is currently in use. */ }
   }
 }
 

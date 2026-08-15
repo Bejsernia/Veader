@@ -5,7 +5,10 @@ jest.mock('../cache', () => ({
   getCacheBreakdown: jest.fn(async () => ({ page: 10, source: 20, total: 30 })),
   getPageCacheLimitMb: jest.fn(async () => 512),
   setPageCacheLimitMb: jest.fn(async (value: number) => value),
+  getSourceCacheLimitMb: jest.fn(async () => 2048),
+  setSourceCacheLimitMb: jest.fn(async (value: number) => value),
   trimCacheToLimit: jest.fn(async () => undefined),
+  trimSourceCacheToLimit: jest.fn(async () => undefined),
 }));
 
 import { cacheManager } from './cache-manager';

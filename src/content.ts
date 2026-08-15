@@ -85,7 +85,7 @@ export async function loadMobiComic(book: StoredBook, sessionId: string): Promis
   };
 }
 
-export async function loadMobiPage(book: StoredBook, page: EpubComicPage, sessionId: string) {
+export async function loadMobiPage(book: StoredBook, page: EpubComicPage, sessionId: string, targetWidth = 1600) {
   let session = mobiSessions.get(sessionId);
   if (!session || session.sourceUri !== book.localUri) {
     await loadMobiComic(book, sessionId);
@@ -95,7 +95,7 @@ export async function loadMobiPage(book: StoredBook, page: EpubComicPage, sessio
   const recordIndex = Number(page.imageUri.slice(MOBI_ENTRY_PREFIX.length));
   const native = getDocumentReader();
   if (session.native && Platform.OS === 'android' && native?.renderPage) {
-    return String(await native.renderPage({ uri: book.localUri, format: 'mobi', pageIndex: recordIndex, targetWidth: 1600, sessionId }));
+    return String(await native.renderPage({ uri: book.localUri, format: 'mobi', pageIndex: recordIndex, targetWidth: Math.round(targetWidth), sessionId }));
   }
   if (!session.bytes) throw new Error('MOBI 阅读会话没有可用数据');
   const recordStart = readU32(session.bytes, 78 + recordIndex * 8);

@@ -22,6 +22,50 @@ import android.graphics.pdf.PdfRenderer
 class DocumentReaderModule(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
   override fun getName() = "DocumentReader"
 
+  /** Stable cross-platform contract. Legacy format-specific methods remain as aliases. */
+  @ReactMethod
+  fun getInfo(uri: String, format: String?, promise: Promise) {
+    when (format?.lowercase()) {
+      "pdf" -> getPdfInfo(uri, promise)
+      "mobi" -> getMobiInfo(uri, promise)
+      else -> promise.reject("INVALID_FORMAT", "不支持的文档格式")
+    }
+  }
+
+  @ReactMethod
+  fun openSession(input: ReadableMap, promise: Promise) {
+    promise.resolve(input.getString("sessionId") ?: "reader-session")
+  }
+
+  @ReactMethod
+  fun renderPage(input: ReadableMap, promise: Promise) {
+    val uri = input.getString("uri")
+    val format = input.getString("format")?.lowercase()
+    val pageIndex = if (input.hasKey("pageIndex")) input.getInt("pageIndex") else -1
+    val targetWidth = if (input.hasKey("targetWidth")) input.getInt("targetWidth") else 1200
+    if (uri.isNullOrBlank() || pageIndex < 0) {
+      promise.reject("INVALID_PAGE", "页面参数无效")
+      return
+    }
+    when (format) {
+      "pdf" -> renderPdfPage(uri, pageIndex, targetWidth, promise)
+      "mobi" -> renderMobiPage(uri, pageIndex, targetWidth, promise)
+      else -> promise.reject("INVALID_FORMAT", "不支持的文档格式")
+    }
+  }
+
+  @ReactMethod
+  fun prefetch(input: ReadableMap, promise: Promise) {
+    // PageLoader owns prioritization and concurrency. Android rendering is
+    // intentionally demand-driven so this bridge never blocks on a large batch.
+    promise.resolve(null)
+  }
+
+  @ReactMethod
+  fun closeSession(sessionId: String, promise: Promise) {
+    promise.resolve(null)
+  }
+
   @ReactMethod
   fun getPdfInfo(uri: String, promise: Promise) {
     try {
@@ -48,7 +92,7 @@ class DocumentReaderModule(private val context: ReactApplicationContext) : React
       }
       openPdf(uri).use { descriptor ->
         PdfRenderer(descriptor).use { renderer ->
-          if (pageIndex !in 0 until renderer.pageCount) throw IllegalArgumentException("PDF 页码不存在")
+          if (pageIndex !in 0 until renderer.pageCount) throw IllegalArgumentException("PDF page index out of range")
           renderer.openPage(pageIndex).use { page ->
             val ratio = page.height.toFloat() / page.width.toFloat()
             val width = safeWidth
@@ -175,7 +219,7 @@ class DocumentReaderModule(private val context: ReactApplicationContext) : React
     val output = ByteArray(length)
     val buffer = ByteBuffer.wrap(output)
     channel.position(position)
-    while (buffer.hasRemaining()) if (channel.read(buffer) < 0) throw IllegalArgumentException("文件读取不完整")
+    while (buffer.hasRemaining()) if (channel.read(buffer) < 0) throw IllegalArgumentException("File read incomplete")
     return output
   }
 
@@ -184,12 +228,12 @@ class DocumentReaderModule(private val context: ReactApplicationContext) : React
     if (fileSize < 78) throw IllegalArgumentException("MOBI 文件过小")
     val header = readChannel(channel, 0, 78)
     val count = u16(header, 76)
-    if (count <= 0 || 78L + count * 8L > fileSize) throw IllegalArgumentException("MOBI 记录表无效")
+    if (count <= 0 || 78L + count * 8L > fileSize) throw IllegalArgumentException("Invalid MOBI record table")
     val table = readChannel(channel, 78, count * 8)
     val offsets = LongArray(count)
     for (index in 0 until count) offsets[index] = u32(table, index * 8).toLong()
     val record0 = offsets[0]
-    if (record0 < 0 || record0 + 16 > fileSize) throw IllegalArgumentException("MOBI 主记录无效")
+    if (record0 < 0 || record0 + 16 > fileSize) throw IllegalArgumentException("Invalid MOBI first record")
     val palmHeader = readChannel(channel, record0, 16)
     val textRecordCount = u16(palmHeader, 8)
     val imageRecords = mutableListOf<Int>()
@@ -201,7 +245,7 @@ class DocumentReaderModule(private val context: ReactApplicationContext) : React
         signature[0].toInt() == 0x89 && signature[1].toInt() == 0x50 && signature[2].toInt() == 0x4e && signature[3].toInt() == 0x47 ||
         signature[0].toInt() == 0x47 && signature[1].toInt() == 0x49 && signature[2].toInt() == 0x46) imageRecords.add(index)
     }
-    if (imageRecords.isEmpty()) throw IllegalArgumentException("MOBI 中没有找到漫画图片")
+    if (imageRecords.isEmpty()) throw IllegalArgumentException("No comic images found in MOBI")
     val metadata = readMobiMetadata(channel, record0, fileSize)
     return MobiIndex(offsets, imageRecords, metadata.first, metadata.second)
   }

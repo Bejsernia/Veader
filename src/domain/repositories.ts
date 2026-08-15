@@ -1,5 +1,4 @@
-import type { LibraryQuery, ProgressUpdate, RefreshResult } from './models';
-import type { LibrarySeries, StoredChapter, StoredSource } from '../library';
+import type { LibraryQuery, LibrarySeries, ProgressUpdate, RefreshResult, StoredChapter, StoredSource } from './models';
 
 export interface LibraryRepository {
   initialize(): Promise<void>;
@@ -21,7 +20,7 @@ export interface ProgressRepository {
 
 export interface SourceRepository {
   list(): Promise<StoredSource[]>;
-  save(type: StoredSource['type'], name: string, endpoint: string, bookCount?: number): Promise<void>;
+  save(type: StoredSource['type'], name: string, endpoint: string, bookCount?: number): Promise<number>;
   rename(sourceId: number, name: string): Promise<void>;
   remove(sourceId: number): Promise<void>;
   setEnabled(sourceId: number, enabled: boolean): Promise<void>;

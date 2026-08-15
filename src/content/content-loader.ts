@@ -17,6 +17,7 @@ import {
 } from '../content';
 import type { EpubComic } from '../content';
 import { clearEpubSession } from '../epub-native';
+import { getDocumentReader } from '../platform/nativeContracts';
 
 export type ContentSession = {
   comic: EpubComic;
@@ -87,11 +88,21 @@ export const contentLoader: ContentLoader = {
 
   async open(locator, options) {
     const book = bookFromLocator(locator);
-    const comic = book.format === 'epub'
-      ? await loadEpubComic(book)
-      : book.format === 'mobi'
-        ? await loadMobiComic(book, options.sessionId)
-        : await loadPdfComic(book);
+    const native = getDocumentReader();
+    const nativeSessionId = native?.openSession
+      ? await native.openSession({ uri: book.localUri, format: book.format, sessionId: options.sessionId })
+      : undefined;
+    let comic: EpubComic;
+    try {
+      comic = book.format === 'epub'
+        ? await loadEpubComic(book)
+        : book.format === 'mobi'
+          ? await loadMobiComic(book, options.sessionId)
+          : await loadPdfComic(book);
+    } catch (error) {
+      if (nativeSessionId && native?.closeSession) await native.closeSession(nativeSessionId).catch(() => undefined);
+      throw error;
+    }
     const info = toInfo(comic);
 
     const getPage = async (index: number, pageOptions: PageOptions): Promise<PageResult> => {
@@ -100,7 +111,7 @@ export const contentLoader: ContentLoader = {
       const uri = book.format === 'epub'
         ? await loadEpubPage(book, page, options.sessionId)
         : book.format === 'mobi'
-          ? await loadMobiPage(book, page, options.sessionId)
+          ? await loadMobiPage(book, page, options.sessionId, pageOptions.targetWidth || options.targetWidth || 1600)
           : await loadPdfPage(book, page, pageOptions.targetWidth || options.targetWidth || 1200);
       return pageResult(index, uri);
     };
@@ -118,6 +129,7 @@ export const contentLoader: ContentLoader = {
       async close() {
         if (book.format === 'mobi') await clearMobiSession(options.sessionId);
         if (book.format === 'epub') await clearEpubSession(options.sessionId);
+        if (nativeSessionId && native?.closeSession) await native.closeSession(nativeSessionId);
       },
     };
   },

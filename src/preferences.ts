@@ -32,7 +32,7 @@ async function writePreferences(value: Preferences) {
 
 export async function loadThemeMode(): Promise<ThemeMode> {
   const preferences = await readPreferences();
-  return preferences.themeMode ?? 'system';
+  return preferences.themeMode ?? 'dark';
 }
 
 export async function saveThemeMode(themeMode: ThemeMode) {

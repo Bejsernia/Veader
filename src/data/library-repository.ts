@@ -1,23 +1,19 @@
 import {
-  clearSeriesHistory,
   chooseSeriesCover,
   configureLibraryRoot,
-  deleteSource,
   ensureChapterLocal,
   initializeLibrary,
   listChapters,
   listSeries,
   listSources,
-  renameSource,
   refreshAllLibraries,
   recordChapterContentInfo,
-  saveSource,
   setSeriesCover,
-  setSourceEnabled,
-  updateChapterProgress,
 } from '../library';
-import type { LibraryRepository, ProgressRepository, SourceRepository } from '../domain/repositories';
-import type { LibraryQuery, ProgressUpdate, RefreshResult } from '../domain/models';
+import type { LibraryRepository } from '../domain/repositories';
+import type { LibraryQuery, RefreshResult } from '../domain/models';
+import { progressRepository } from './progress-repository';
+import { sourceRepository } from './source-repository';
 
 export const libraryRepository: LibraryRepository = {
   initialize: initializeLibrary,
@@ -48,35 +44,22 @@ export const libraryRepository: LibraryRepository = {
     const before = await listSources();
     const source = before.find(item => item.id === sourceId);
     if (!source) throw new Error('漫画来源不存在');
-    const beforeSeries = await listSeries({ fast: true });
-    await refreshAllLibraries();
-    const afterSeries = await listSeries({ fast: true });
+    const beforeSeries = (await listSeries({ fast: true })).filter(item => item.sourceUri.startsWith(source.endpoint));
+    await refreshAllLibraries(sourceId);
+    const afterSeries = (await listSeries({ fast: true })).filter(item => item.sourceUri.startsWith(source.endpoint));
     const afterSource = (await listSources()).find(item => item.id === sourceId);
+    const beforeIds = new Set(beforeSeries.map(item => item.id));
+    const afterIds = new Set(afterSeries.map(item => item.id));
     return {
       sourceId,
-      seriesCount: afterSeries.filter(item => item.sourceUri.startsWith(source.endpoint)).length,
+      seriesCount: afterSeries.length,
       chapterCount: afterSource?.bookCount ?? 0,
-      added: Math.max(0, afterSeries.length - beforeSeries.length),
-      updated: 0,
-      removed: Math.max(0, beforeSeries.length - afterSeries.length),
+      added: afterSeries.filter(item => !beforeIds.has(item.id)).length,
+      updated: afterSeries.filter(item => beforeIds.has(item.id) && item.updatedAt > (beforeSeries.find(previous => previous.id === item.id)?.updatedAt ?? 0)).length,
+      removed: beforeSeries.filter(item => !afterIds.has(item.id)).length,
       errors: [],
     };
   },
 };
 
-export const progressRepository: ProgressRepository = {
-  saveProgress({ chapter, progress, location }: ProgressUpdate) {
-    return updateChapterProgress(chapter, progress, location);
-  },
-  clearHistory(seriesId) {
-    return clearSeriesHistory(seriesId);
-  },
-};
-
-export const sourceRepository: SourceRepository = {
-  list: listSources,
-  save: saveSource,
-  rename: renameSource,
-  remove: deleteSource,
-  setEnabled: setSourceEnabled,
-};
+export { progressRepository, sourceRepository };
