@@ -96,8 +96,10 @@ function Prepare-ReleaseJsBundle {
   Move-Item -LiteralPath $hermesOutput -Destination $bundle -Force
   Move-Item -LiteralPath "$hermesOutput.map" -Destination $compilerMap -Force
 
-  & $node (Join-Path $ProjectRoot 'node_modules\react-native\scripts\compose-source-maps.js') $packagerMap $compilerMap -o $sourceMap
-  if ($LASTEXITCODE -ne 0) { throw "Source map composition failed with exit code $LASTEXITCODE" }
+  # The composed source map is only useful for debugging and is not required
+  # in the APK. On Windows, composing the Hermes and Metro maps can hang after
+  # the bundle has already been generated, which prevents Gradle from starting.
+  Write-Host 'Skipping optional source-map composition for Android release build.'
 }
 
 $tempRoot = Join-Path $projectRoot '.tmp'
@@ -114,7 +116,7 @@ $env:NODE_ENV = 'production'
 $env:VEADER_NODE_EXECUTABLE = (Get-Command node -ErrorAction Stop).Source
 $env:CMAKE_BUILD_PARALLEL_LEVEL = '1'
 $env:GRADLE_OPTS = '-Dhttps.protocols=TLSv1.2 -Djdk.tls.client.protocols=TLSv1.2 -Dhttp.keepAlive=false'
-$androidArchitectures = if ($env:VEADER_ANDROID_ARCHITECTURES) { $env:VEADER_ANDROID_ARCHITECTURES } else { 'x86_64' }
+$androidArchitectures = if ($env:VEADER_ANDROID_ARCHITECTURES) { $env:VEADER_ANDROID_ARCHITECTURES } else { 'arm64-v8a' }
 Write-Host "Android architectures: $androidArchitectures"
 
 Remove-StaleNativeCmakeCaches -ProjectRoot $projectRoot
