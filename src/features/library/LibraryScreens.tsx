@@ -11,6 +11,7 @@ import { tagRepository } from '../../data/tag-repository';
 import { useTheme } from '../../ui/theme';
 import { styles, layoutStyles, pageLayoutStyles, uiStyles } from '../../ui/legacy-styles';
 import { compactAuthor, IconButton, Progress, SeriesProgress } from '../shared/library-ui';
+import { normalizeDailyRows } from '../stats/chart-utils';
 
 function SeriesLibrary({ series, importing, refreshLibraries, openSeries, continueSeries, openSources }: { series: LibrarySeries[]; importing: boolean; refreshLibraries: () => void; openSeries: (value: LibrarySeries) => void; continueSeries: (value: LibrarySeries) => void; openSources: () => void }) {
   const [query, setQuery] = useState('');
@@ -55,8 +56,9 @@ function SeriesDetail({ series, chapters: seriesChapters, back, openChapter, con
 function formatMinutes(value: number) { const minutes = Math.round(value / 60000); return minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes} min`; }
 
 function StatsSummaryCard({ summary, onPress, isDark }: { summary: ReadingStatsSummary; onPress: () => void; isDark: boolean }) {
-  const max = Math.max(1, ...summary.daily.map(item => item.durationMs));
-  return <PressableScale onPress={onPress} style={[styles.statsSummaryCard, isDark && styles.cardDark]}><View style={styles.statsSummaryTop}><View><Text style={[styles.statsEyebrow, isDark && styles.textMutedDark]}>最近 7 天</Text><Text style={[styles.statsSummaryValue, isDark && styles.textPrimaryDark]}>{formatMinutes(summary.totalDurationMs)}</Text><Text style={[styles.meta, isDark && styles.textMutedDark]}>{summary.totalPages} 页 · {summary.bookCount} 部作品</Text></View><Ionicons name="stats-chart" size={24} color={isDark ? '#C8B9FF' : '#7257E7'} /></View><View style={styles.miniChart}>{summary.daily.slice(-7).map(item => <View key={item.key} style={styles.miniChartColumn}><View style={[styles.miniChartBar, { height: `${Math.max(5, item.durationMs / max * 100)}%` }]} /><Text style={[styles.miniChartLabel, isDark && styles.textMutedDark]}>{item.label}</Text></View>)}</View><Text style={styles.statsLink}>查看详细统计 →</Text></PressableScale>;
+  const rows = normalizeDailyRows(summary);
+  const max = Math.max(1, ...rows.map(item => item.durationMs));
+  return <PressableScale onPress={onPress} style={[styles.statsSummaryCard, isDark && styles.cardDark]}><View style={styles.statsSummaryTop}><View><Text style={[styles.statsEyebrow, isDark && styles.textMutedDark]}>最近 7 天</Text><Text style={[styles.statsSummaryValue, isDark && styles.textPrimaryDark]}>{formatMinutes(summary.totalDurationMs)}</Text><Text style={[styles.meta, isDark && styles.textMutedDark]}>{summary.totalPages} 页 · {summary.bookCount} 部作品</Text></View><Ionicons name="stats-chart" size={24} color={isDark ? '#C8B9FF' : '#7257E7'} /></View><View style={styles.miniChart}>{rows.map(item => <View key={item.key} style={styles.miniChartColumn}><View style={[styles.miniChartBar, { height: `${Math.max(5, item.durationMs / max * 100)}%` }]} /><Text style={[styles.miniChartLabel, isDark && styles.textMutedDark]}>{item.label}</Text></View>)}</View><Text style={styles.statsLink}>查看详细统计 →</Text></PressableScale>;
 }
 
 function Recent({ series, openSeries, clearHistory, statsSummary, openStats }: { series: LibrarySeries[]; openSeries: (value: LibrarySeries) => void; clearHistory: (id: number) => void; statsSummary?: ReadingStatsSummary; openStats: () => void }) {

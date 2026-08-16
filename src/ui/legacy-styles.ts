@@ -37,6 +37,24 @@ export const categoryStyles = StyleSheet.create({
   categoryOverviewDividerDark: { backgroundColor: '#4B4161' },
 });
 
+export const statsChartStyles = StyleSheet.create({
+  dailyChart: { flexDirection: 'row', alignItems: 'flex-start', marginTop: 24 },
+  dailyYAxis: { width: 34, height: 152, marginRight: 8, position: 'relative' },
+  dailyAxisUnit: { position: 'absolute', top: -20, left: 0, color: '#807A86', fontSize: 9, lineHeight: 14 },
+  dailyYAxisTicks: { height: 128, justifyContent: 'space-between' },
+  dailyAxisText: { color: '#807A86', fontSize: 9, lineHeight: 14, textAlign: 'right' },
+  dailyAxisTextDark: { color: '#B8B1C2' },
+  dailyPlot: { height: 152 },
+  dailyPlotArea: { position: 'relative' },
+  dailyGridLine: { position: 'absolute', left: 0, right: 0, height: StyleSheet.hairlineWidth, backgroundColor: '#E4E0E8' },
+  dailyGridLineDark: { backgroundColor: '#3A3443' },
+  dailyBarsRow: { flexDirection: 'row', alignItems: 'flex-end' },
+  dailyBarSlot: { height: '100%', alignItems: 'center', justifyContent: 'flex-end' },
+  dailyBar: { borderRadius: 4, backgroundColor: '#0F9F91' },
+  dailyXAxis: { flexDirection: 'row', alignItems: 'flex-start' },
+  dailyXAxisLabel: { color: '#8A8691', fontSize: 9, lineHeight: 14, textAlign: 'center' },
+});
+
 export const pageLayoutStyles = StyleSheet.create({
   pageHeader: { minHeight: 44, alignItems: 'flex-start' }, pageTitle: { flex: 1, minWidth: 0 }, trailingAction: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 0, paddingVertical: 0 }, headerSpacer: { width: 44, height: 44 }, recentSectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 18, marginBottom: 10, width: '100%' }, rowContent: { flex: 1, minWidth: 0 }, historyOpenArea: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 14 }, historyBody: { flex: 1, minWidth: 0, justifyContent: 'center', gap: 4, paddingVertical: 2 }, historyTitle: { minWidth: 0, marginBottom: 0, lineHeight: 21 }, historyAuthorSlot: { minWidth: 0, minHeight: 18, justifyContent: 'flex-start' }, historyAuthor: { minWidth: 0, color: '#88838E', fontSize: 12, lineHeight: 17 }, historyProgress: { minWidth: 0, lineHeight: 19 }, readerSettingsContent: { minHeight: 0, paddingBottom: 4 }, readerSettingsScrollContent: { minWidth: 0, paddingBottom: 8 }, chapterDirectoryList: { minWidth: 0, paddingBottom: 8 }, chapterDirectoryBody: { flex: 1, minWidth: 0 }, alignedSettingsGroup: { paddingHorizontal: 0 }, alignedSettingRow: { paddingHorizontal: 16, minWidth: 0 },
 });
