@@ -71,8 +71,8 @@ export function AppShell({ features }: { features: FeatureComponents }) {
   const [seriesChapters, setSeriesChapters] = useState<StoredChapter[]>([]);
   const [statsSummary, setStatsSummary] = useState<ReadingStatsSummary>();
 
-  const refreshBooks = async () => {
-    setSeries(await libraryRepository.listSeries());
+  const refreshBooks = async (refreshMetadata = false) => {
+    setSeries(await libraryRepository.listSeries(refreshMetadata ? { refreshMetadata: true } : undefined));
   };
   const refreshStats = async () => { setStatsSummary(await statsRepository.getSummary('7d')); };
 
@@ -87,7 +87,7 @@ export function AppShell({ features }: { features: FeatureComponents }) {
           setSeries(fastSeries);
           setLibraryReady(true);
         }
-        const hydratedSeries = await libraryRepository.listSeries();
+        const hydratedSeries = await libraryRepository.listSeries({ refreshMetadata: true });
         if (active) setSeries(hydratedSeries);
         if (active) await refreshStats();
       } catch (reason) {
@@ -130,7 +130,7 @@ export function AppShell({ features }: { features: FeatureComponents }) {
     setImporting(true);
     try {
       await libraryRepository.refreshAll();
-      await refreshBooks();
+      await refreshBooks(true);
     } finally {
       setImporting(false);
     }
@@ -166,7 +166,7 @@ export function AppShell({ features }: { features: FeatureComponents }) {
   };
 
   const refreshSelectedSeries = async () => {
-    await refreshBooks();
+    await refreshBooks(true);
     if (!selectedSeries) return;
     const updated = (await libraryRepository.listSeries()).find(item => item.id === selectedSeries.id);
     if (updated) { setSelectedSeries(updated); setSeriesChapters(await libraryRepository.listChapters(updated.id)); }
@@ -184,7 +184,7 @@ export function AppShell({ features }: { features: FeatureComponents }) {
         return progressRepository.saveProgress({ chapter: selectedStored as StoredChapter, progress, location });
       }}
       onSetCover={uri => {
-        if (selectedSeries) void libraryRepository.setSeriesCover(selectedSeries.id, uri).then(refreshBooks).catch(console.warn);
+        if (selectedSeries) void libraryRepository.setSeriesCover(selectedSeries.id, uri).then(() => refreshBooks()).catch(console.warn);
       }}
     />;
   }
@@ -203,7 +203,7 @@ export function AppShell({ features }: { features: FeatureComponents }) {
       }).catch(console.warn)}
     />;
   }
-  if (screen === 'sources') return <Sources back={goBack} onBooksChanged={() => { void refreshBooks(); }} />;
+  if (screen === 'sources') return <Sources back={goBack} onBooksChanged={() => { void refreshBooks(true); }} />;
   if (screen === 'cache') return <CacheSettings back={goBack} />;
   if (screen === 'about') return <SettingsPage screen={screen} back={goBack} />;
   if (screen === 'readingStats') return <ReadingStats back={goBack} />;
@@ -216,7 +216,7 @@ export function AppShell({ features }: { features: FeatureComponents }) {
       : tab === 'categories'
         ? <Categories series={series} openSeries={openSeries} />
       : tab === 'recent'
-        ? <Recent series={series} openSeries={openSeries} clearHistory={id => progressRepository.clearHistory(id).then(refreshBooks).catch(console.warn)} statsSummary={statsSummary} openStats={() => setScreen('readingStats')} />
+        ? <Recent series={series} openSeries={openSeries} clearHistory={id => progressRepository.clearHistory(id).then(() => refreshBooks()).catch(console.warn)} statsSummary={statsSummary} openStats={() => setScreen('readingStats')} />
         : <Me navigate={setScreen} />;
 
   return <SafeAreaView style={{ flex: 1, backgroundColor: isDark ? '#111114' : '#F8F7FA' }}>

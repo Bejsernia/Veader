@@ -50,7 +50,7 @@ export function CategoriesScreen({ series, openSeries }: Props) {
     if (selected && !selected.automatic) setSelected(nextCategories.find(item => item.id === selected.id));
   };
 
-  useEffect(() => { void reload().catch(console.warn); }, []);
+  useEffect(() => { void reload().catch(console.warn); }, [series]);
 
   const automaticCategories = useMemo<DisplayCategory[]>(() => tags.map(tag => ({
     id: -tag.id,
@@ -100,7 +100,7 @@ export function CategoriesScreen({ series, openSeries }: Props) {
   );
 
   const renderAutomaticCategory = (category: DisplayCategory) => (
-    <PressableScale key={category.id} onPress={() => setSelected(category)} style={[styles.categoryCard, isDark && styles.cardDark, { backgroundColor: isDark ? '#211C29' : '#FAF8FF', borderWidth: 1, borderColor: isDark ? '#3F3558' : '#E7DFFF' }]}>
+    <PressableScale key={category.id} onPress={() => setSelected(category)} style={[styles.categoryCard, isDark && styles.cardDark, { width: '48%', marginTop: 0, padding: 12, backgroundColor: isDark ? '#211C29' : '#FAF8FF', borderWidth: 1, borderColor: isDark ? '#3F3558' : '#E7DFFF' }]}>
       <View style={styles.categoryCardTop}>
         <CategoryIcon category={category} isDark={isDark} />
         <View style={pageLayoutStyles.rowContent}>
@@ -169,9 +169,9 @@ export function CategoriesScreen({ series, openSeries }: Props) {
 
       {automaticCategories.length > 0 && <Text style={[styles.sectionTitle, isDark && styles.textPrimaryDark, { marginTop: categories.length ? 26 : 24 }]}>自动分类</Text>}
       {automaticAuthors.length > 0 && <Text style={[styles.settingSection, isDark && uiStyles.settingSectionDark, { marginTop: 14 }]}>作者</Text>}
-      {automaticAuthors.map(renderAutomaticCategory)}
-      {automaticTags.length > 0 && <Text style={[styles.settingSection, isDark && uiStyles.settingSectionDark, { marginTop: 14 }]}>标签</Text>}
-      {automaticTags.map(renderAutomaticCategory)}
+      {automaticAuthors.length > 0 && <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 10, marginTop: 10 }}>{automaticAuthors.map(renderAutomaticCategory)}</View>}
+      {automaticTags.length > 0 && <Text style={[styles.settingSection, isDark && uiStyles.settingSectionDark, { marginTop: 18 }]}>标签</Text>}
+      {automaticTags.length > 0 && <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 10, marginTop: 10 }}>{automaticTags.map(renderAutomaticCategory)}</View>}
 
       {!hasAnyCategory && <View style={styles.empty}>
         <Ionicons name="albums-outline" size={38} color="#B2ADB7" />
@@ -200,4 +200,3 @@ export function CategoriesScreen({ series, openSeries }: Props) {
     </BottomSheet>
   </SafeAreaView>;
 }
-

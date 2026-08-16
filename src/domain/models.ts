@@ -64,6 +64,7 @@ export type LibraryQuery = {
   sourceId?: number;
   categoryId?: number;
   tagId?: number;
+  refreshMetadata?: boolean;
   sort?: 'updated' | 'title' | 'progress';
 };
 

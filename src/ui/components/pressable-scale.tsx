@@ -26,6 +26,7 @@ export function PressableScale({ haptic: _haptic = 'none', scale = 0.97, onPress
 
   const resolvedStyle = typeof style === 'function' ? style({ pressed }) : style;
   const flattenedStyle = StyleSheet.flatten(resolvedStyle) as ViewStyle | undefined;
+  const interactionStyle = [{ width: flattenedStyle?.width, height: flattenedStyle?.height, borderRadius: flattenedStyle?.borderRadius }];
   const contentStyle: ViewStyle = {
     flexDirection: flattenedStyle?.flexDirection ?? 'column',
     alignItems: flattenedStyle?.alignItems,
@@ -39,7 +40,7 @@ export function PressableScale({ haptic: _haptic = 'none', scale = 0.97, onPress
       disabled={disabled}
       onPressIn={event => { setPressed(true); progress.value = withSpring(1, motionSpring); onPressIn?.(event); }}
       onPressOut={event => { setPressed(false); progress.value = withSpring(0, motionSpring); onPressOut?.(event); }}
-      style={[resolvedStyle, StyleSheet.absoluteFill, { backgroundColor: 'transparent' }]}
+      style={[interactionStyle, StyleSheet.absoluteFill, { backgroundColor: 'transparent' }]}
     />
     <View pointerEvents="none" style={contentStyle}>{children}</View>
   </Animated.View>;

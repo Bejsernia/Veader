@@ -35,15 +35,15 @@ export async function listSeries(options: { refreshMetadata?: boolean; fast?: bo
     (SELECT chapter_number FROM chapters current_chapter WHERE current_chapter.id = s.current_chapter_id) AS current_chapter_number
     FROM series s LEFT JOIN chapters c ON c.series_id = s.id GROUP BY s.id ORDER BY s.updated_at DESC`);
   if (!options.fast) {
-    await Promise.all(rows.map(async row => {
+    for (const row of rows) {
       await restoreSeriesCover(row, db);
       if (options.refreshMetadata || !String(row.author ?? '').trim()) {
         const firstChapter = await db.getFirstAsync<any>('SELECT local_uri, original_name, format FROM chapters WHERE series_id = ? ORDER BY chapter_number, original_name LIMIT 1', row.id);
-        if (!firstChapter) return;
+        if (!firstChapter) continue;
         const metadata = await scanSeriesMetadata(firstChapter.local_uri, firstChapter.original_name, firstChapter.format as BookFormat);
         if (metadata.author.trim() || metadata.author !== String(row.author ?? '')) await syncAuthorTag(Number(row.id), metadata.author);
       }
-    }));
+    }
   }
   const tagMap = await listSeriesTagsForIds(rows.map(row => Number(row.id)));
   return rows.map(row => ({ id: row.id, title: row.title, author: row.author, sourceUri: row.source_uri, sourceId: row.source_id ?? undefined, coverUri: row.cover_uri, currentChapterTitle: row.current_chapter_title, currentChapterNumber: row.current_chapter_number,

@@ -18,7 +18,8 @@ import { sourceRepository } from './source-repository';
 export const libraryRepository: LibraryRepository = {
   initialize: initializeLibrary,
   async listSeries(query) {
-    const rows = await listSeries({ refreshMetadata: false, fast: true });
+    const refreshMetadata = query?.refreshMetadata === true;
+    const rows = await listSeries({ refreshMetadata, fast: !refreshMetadata });
     let filtered = rows;
     if (query?.sourceId !== undefined) {
       const source = (await listSources()).find(item => item.id === query.sourceId);
