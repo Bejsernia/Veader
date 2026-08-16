@@ -9,7 +9,7 @@ import { BottomSheet } from '../../ui/components/bottom-sheet';
 import { BookCard } from '../../ui/components/book-card';
 import { PressableScale } from '../../ui/components/pressable-scale';
 import { getGridLayout } from '../../ui/layout';
-import { styles, layoutStyles, pageLayoutStyles, uiStyles } from '../../ui/legacy-styles';
+import { styles, categoryStyles, layoutStyles, pageLayoutStyles, uiStyles } from '../../ui/legacy-styles';
 import { useTheme } from '../../ui/theme';
 import { SeriesProgress, IconButton } from '../shared/library-ui';
 
@@ -29,6 +29,25 @@ function CategoryIcon({ category, isDark }: { category: DisplayCategory; isDark:
   return <View style={[styles.categoryIcon, isDark && styles.scanCardDark]}>
     <Ionicons name={category.automatic && tag?.kind === 'author' ? 'person-outline' : 'albums-outline'} size={22} color={isDark ? '#C8B9FF' : '#7257E7'} />
   </View>;
+}
+
+function AutomaticCategoryTile({ category, isDark, onPress }: { category: DisplayCategory; isDark: boolean; onPress: () => void }) {
+  const isAuthor = category.tags[0]?.kind === 'author';
+  return <PressableScale
+    onPress={onPress}
+    accessibilityRole="button"
+    accessibilityLabel={`打开${isAuthor ? '作者' : '标签'}${category.name}，${category.bookCount}部作品`}
+    style={[categoryStyles.automaticCategoryTile, isAuthor ? categoryStyles.automaticAuthorTile : categoryStyles.automaticTagTile, isDark && (isAuthor ? categoryStyles.automaticAuthorTileDark : categoryStyles.automaticTagTileDark)]}
+  >
+    <View style={[categoryStyles.automaticCategoryIcon, isAuthor ? categoryStyles.automaticAuthorIcon : categoryStyles.automaticTagIcon, isDark && (isAuthor ? categoryStyles.automaticAuthorIconDark : categoryStyles.automaticTagIconDark)]}>
+      <Ionicons name={isAuthor ? 'person-outline' : 'pricetag-outline'} size={18} color={isDark ? '#D6C9FF' : isAuthor ? '#7257E7' : '#756D80'} />
+    </View>
+    <View style={categoryStyles.automaticCategoryBody}>
+      <Text numberOfLines={1} ellipsizeMode="tail" style={[categoryStyles.automaticCategoryName, isDark && styles.textPrimaryDark]}>{category.name}</Text>
+      <Text style={[categoryStyles.automaticCategoryCount, isDark && styles.textMutedDark]}>{category.bookCount} 部作品</Text>
+    </View>
+    <Ionicons name="chevron-forward" size={17} color={isDark ? '#B9A5FF' : '#9A86E8'} />
+  </PressableScale>;
 }
 
 export function CategoriesScreen({ series, openSeries }: Props) {
@@ -60,7 +79,7 @@ export function CategoriesScreen({ series, openSeries }: Props) {
     createdAt: 0,
     updatedAt: 0,
     automatic: true,
-  })), [series, tags]);
+  })).sort((left, right) => right.bookCount - left.bookCount || left.name.localeCompare(right.name, 'zh-CN')), [series, tags]);
 
   const automaticAuthors = automaticCategories.filter(category => category.tags[0]?.kind === 'author');
   const automaticTags = automaticCategories.filter(category => category.tags[0]?.kind !== 'author');
@@ -99,21 +118,8 @@ export function CategoriesScreen({ series, openSeries }: Props) {
     [selected, series],
   );
 
-  const renderAutomaticCategory = (category: DisplayCategory) => (
-    <PressableScale key={category.id} onPress={() => setSelected(category)} style={[styles.categoryCard, isDark && styles.cardDark, { width: '48%', marginTop: 0, padding: 12, backgroundColor: isDark ? '#211C29' : '#FAF8FF', borderWidth: 1, borderColor: isDark ? '#3F3558' : '#E7DFFF' }]}>
-      <View style={styles.categoryCardTop}>
-        <CategoryIcon category={category} isDark={isDark} />
-        <View style={pageLayoutStyles.rowContent}>
-          <Text numberOfLines={1} style={[styles.rowTitle, isDark && styles.textPrimaryDark]}>{category.name}</Text>
-          <Text style={[styles.meta, isDark && styles.textMutedDark]}>{category.tags[0]?.kind === 'author' ? '作者' : '标签'} · {category.bookCount} 部作品</Text>
-        </View>
-        <Ionicons name="chevron-forward" size={19} color={isDark ? '#B9A5FF' : '#9A86E8'} />
-      </View>
-    </PressableScale>
-  );
-
   const renderCustomCategory = (category: Category) => (
-    <View key={category.id} style={[styles.categoryCard, isDark && styles.cardDark]}>
+    <View key={category.id} style={[categoryStyles.customCategoryCard, isDark && categoryStyles.customCategoryCardDark]}>
       <View style={styles.categoryCardTop}>
         <PressableScale onPress={() => setSelected(category)} accessibilityRole="button" accessibilityLabel={`打开分类${category.name}`} style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
           <CategoryIcon category={category} isDark={isDark} />
@@ -164,14 +170,31 @@ export function CategoriesScreen({ series, openSeries }: Props) {
       </View>
       <Text style={[styles.meta, isDark && styles.textMutedDark]}>按作者、题材和自定义 tag 浏览作品</Text>
 
+      <View style={[categoryStyles.categoryOverview, isDark && categoryStyles.categoryOverviewDark]} accessibilityRole="summary">
+        <View style={categoryStyles.categoryOverviewItem}>
+          <Text style={[categoryStyles.categoryOverviewValue, isDark && styles.textPrimaryDark]}>{automaticAuthors.length}</Text>
+          <Text style={[categoryStyles.categoryOverviewLabel, isDark && styles.textMutedDark]}>作者</Text>
+        </View>
+        <View style={[categoryStyles.categoryOverviewDivider, isDark && categoryStyles.categoryOverviewDividerDark]} />
+        <View style={categoryStyles.categoryOverviewItem}>
+          <Text style={[categoryStyles.categoryOverviewValue, isDark && styles.textPrimaryDark]}>{automaticTags.length}</Text>
+          <Text style={[categoryStyles.categoryOverviewLabel, isDark && styles.textMutedDark]}>标签</Text>
+        </View>
+        <View style={[categoryStyles.categoryOverviewDivider, isDark && categoryStyles.categoryOverviewDividerDark]} />
+        <View style={categoryStyles.categoryOverviewItem}>
+          <Text style={[categoryStyles.categoryOverviewValue, isDark && styles.textPrimaryDark]}>{categories.length}</Text>
+          <Text style={[categoryStyles.categoryOverviewLabel, isDark && styles.textMutedDark]}>自定义分类</Text>
+        </View>
+      </View>
+
       {categories.length > 0 && <Text style={[styles.sectionTitle, isDark && styles.textPrimaryDark, { marginTop: 24 }]}>自定义分类</Text>}
       {categories.map(renderCustomCategory)}
 
       {automaticCategories.length > 0 && <Text style={[styles.sectionTitle, isDark && styles.textPrimaryDark, { marginTop: categories.length ? 26 : 24 }]}>自动分类</Text>}
       {automaticAuthors.length > 0 && <Text style={[styles.settingSection, isDark && uiStyles.settingSectionDark, { marginTop: 14 }]}>作者</Text>}
-      {automaticAuthors.length > 0 && <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 10, marginTop: 10 }}>{automaticAuthors.map(renderAutomaticCategory)}</View>}
+      {automaticAuthors.length > 0 && <View style={categoryStyles.automaticCategoryGrid}>{automaticAuthors.map(category => <AutomaticCategoryTile key={category.id} category={category} isDark={isDark} onPress={() => setSelected(category)} />)}</View>}
       {automaticTags.length > 0 && <Text style={[styles.settingSection, isDark && uiStyles.settingSectionDark, { marginTop: 18 }]}>标签</Text>}
-      {automaticTags.length > 0 && <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 10, marginTop: 10 }}>{automaticTags.map(renderAutomaticCategory)}</View>}
+      {automaticTags.length > 0 && <View style={categoryStyles.automaticCategoryGrid}>{automaticTags.map(category => <AutomaticCategoryTile key={category.id} category={category} isDark={isDark} onPress={() => setSelected(category)} />)}</View>}
 
       {!hasAnyCategory && <View style={styles.empty}>
         <Ionicons name="albums-outline" size={38} color="#B2ADB7" />
