@@ -11,6 +11,7 @@ import { getLibraryDatabase, initializeDatabase } from './data/database';
 import { downloadRemoteFile } from './data/remote-download';
 import { buildRemoteCatalog } from './data/remote-catalog';
 import { saveProgressTransaction } from './data/progress-transaction';
+import { listSeriesTagsForIds, syncAuthorTag } from './data/tag-repository';
 import type { BookFormat, LibrarySeries, StoredBook, StoredChapter, StoredSource } from './domain/models';
 export type { BookFormat, LibrarySeries, StoredBook, StoredChapter, StoredSource } from './domain/models';
 
@@ -40,15 +41,14 @@ export async function listSeries(options: { refreshMetadata?: boolean; fast?: bo
         const firstChapter = await db.getFirstAsync<any>('SELECT local_uri, original_name, format FROM chapters WHERE series_id = ? ORDER BY chapter_number, original_name LIMIT 1', row.id);
         if (!firstChapter) return;
         const metadata = await scanSeriesMetadata(firstChapter.local_uri, firstChapter.original_name, firstChapter.format as BookFormat);
-        if (metadata.author !== String(row.author ?? '')) {
-          row.author = metadata.author;
-          await db.runAsync('UPDATE series SET author = ? WHERE id = ?', metadata.author, row.id);
-        }
+        if (metadata.author.trim() || metadata.author !== String(row.author ?? '')) await syncAuthorTag(Number(row.id), metadata.author);
       }
     }));
   }
+  const tagMap = await listSeriesTagsForIds(rows.map(row => Number(row.id)));
   return rows.map(row => ({ id: row.id, title: row.title, author: row.author, sourceUri: row.source_uri, sourceId: row.source_id ?? undefined, coverUri: row.cover_uri, currentChapterTitle: row.current_chapter_title, currentChapterNumber: row.current_chapter_number,
-    chapterSearchText: String(row.chapter_search ?? ''), progress: row.progress, currentChapterId: row.current_chapter_id, chapterCount: row.chapter_count, updatedAt: row.updated_at }));
+    chapterSearchText: String(row.chapter_search ?? ''), progress: row.progress, currentChapterId: row.current_chapter_id, chapterCount: row.chapter_count, updatedAt: row.updated_at,
+    tags: tagMap.get(Number(row.id)) ?? [], authorSource: row.author_source === 'manual' ? 'manual' : 'metadata' }));
 }
 
 async function scanSeriesMetadata(uri: string, filename: string, format: BookFormat): Promise<SeriesMetadata> {

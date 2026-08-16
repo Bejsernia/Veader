@@ -3,9 +3,10 @@ import { ActivityIndicator, Alert, BackHandler, StatusBar, Text, View } from 're
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { AppScreen as Screen, AppTab as Tab } from './navigation';
 import { appTabs } from './navigation';
-import type { LibrarySeries, StoredBook, StoredChapter } from '../domain/models';
+import type { LibrarySeries, ReadingStatsSummary, StoredBook, StoredChapter } from '../domain/models';
 import { libraryRepository } from '../data/library-repository';
 import { progressRepository } from '../data/progress-repository';
+import { statsRepository } from '../data/stats-repository';
 import { BottomTabBar } from '../ui/components/bottom-tab-bar';
 import { useTheme } from '../ui/theme';
 
@@ -22,6 +23,8 @@ export type RecentFeatureProps = {
   series: LibrarySeries[];
   openSeries: (series: LibrarySeries) => void | Promise<void>;
   clearHistory: (seriesId: number) => void | Promise<void>;
+  statsSummary?: ReadingStatsSummary;
+  openStats: () => void;
 };
 
 export type ReaderFeatureProps = {
@@ -35,6 +38,7 @@ export type ReaderFeatureProps = {
 
 export type FeatureComponents = {
   Library: React.ComponentType<LibraryFeatureProps>;
+  Categories: React.ComponentType<{ series: LibrarySeries[]; openSeries: (series: LibrarySeries) => void | Promise<void> }>;
   Recent: React.ComponentType<RecentFeatureProps>;
   Me: React.ComponentType<{ navigate: (screen: Screen) => void }>;
   SeriesDetail: React.ComponentType<{
@@ -44,11 +48,14 @@ export type FeatureComponents = {
     openChapter: (chapter: StoredChapter) => void | Promise<void>;
     continueReading: () => void | Promise<void>;
     uploadCover: () => void | Promise<void>;
+    onSeriesChanged?: () => void | Promise<void>;
   }>;
   DocumentReader: React.ComponentType<ReaderFeatureProps>;
   Sources: React.ComponentType<{ back: () => void; onBooksChanged: () => void }>;
   CacheSettings: React.ComponentType<{ back: () => void }>;
   SettingsPage: React.ComponentType<{ screen: Screen; back: () => void }>;
+  ReadingStats: React.ComponentType<{ back: () => void }>;
+  ReaderSettings: React.ComponentType<{ back: () => void }>;
 };
 
 export function AppShell({ features }: { features: FeatureComponents }) {
@@ -62,16 +69,19 @@ export function AppShell({ features }: { features: FeatureComponents }) {
   const [series, setSeries] = useState<LibrarySeries[]>([]);
   const [selectedSeries, setSelectedSeries] = useState<LibrarySeries>();
   const [seriesChapters, setSeriesChapters] = useState<StoredChapter[]>([]);
+  const [statsSummary, setStatsSummary] = useState<ReadingStatsSummary>();
 
   const refreshBooks = async () => {
     setSeries(await libraryRepository.listSeries());
   };
+  const refreshStats = async () => { setStatsSummary(await statsRepository.getSummary('7d')); };
 
   useEffect(() => {
     let active = true;
     const bootstrap = async () => {
       try {
         await libraryRepository.initialize();
+        await statsRepository.recoverOpenSessions();
         const fastSeries = await libraryRepository.listSeries();
         if (active) {
           setSeries(fastSeries);
@@ -79,6 +89,7 @@ export function AppShell({ features }: { features: FeatureComponents }) {
         }
         const hydratedSeries = await libraryRepository.listSeries();
         if (active) setSeries(hydratedSeries);
+        if (active) await refreshStats();
       } catch (reason) {
         console.warn(reason);
         if (active) setLibraryReady(true);
@@ -101,6 +112,7 @@ export function AppShell({ features }: { features: FeatureComponents }) {
             void libraryRepository.listChapters(next.id).then(setSeriesChapters);
           }
         }
+        void refreshStats().catch(console.warn);
       }).catch(console.warn);
     }
   };
@@ -153,7 +165,13 @@ export function AppShell({ features }: { features: FeatureComponents }) {
     }
   };
 
-  const { Library, Recent, Me, SeriesDetail, DocumentReader, Sources, CacheSettings, SettingsPage } = features;
+  const refreshSelectedSeries = async () => {
+    await refreshBooks();
+    if (!selectedSeries) return;
+    const updated = (await libraryRepository.listSeries()).find(item => item.id === selectedSeries.id);
+    if (updated) { setSelectedSeries(updated); setSeriesChapters(await libraryRepository.listChapters(updated.id)); }
+  };
+  const { Library, Categories, Recent, Me, SeriesDetail, DocumentReader, Sources, CacheSettings, SettingsPage, ReadingStats, ReaderSettings } = features;
   if (screen === 'document' && selectedStored) {
     return <DocumentReader
       key={selectedStored.id}
@@ -177,6 +195,7 @@ export function AppShell({ features }: { features: FeatureComponents }) {
       back={() => setScreen('main')}
       openChapter={openChapter}
       continueReading={() => continueSeries(selectedSeries)}
+      onSeriesChanged={refreshSelectedSeries}
       uploadCover={() => libraryRepository.chooseSeriesCover(selectedSeries.id).then(async () => {
         await refreshBooks();
         const updated = (await libraryRepository.listSeries()).find(item => item.id === selectedSeries.id);
@@ -187,13 +206,17 @@ export function AppShell({ features }: { features: FeatureComponents }) {
   if (screen === 'sources') return <Sources back={goBack} onBooksChanged={() => { void refreshBooks(); }} />;
   if (screen === 'cache') return <CacheSettings back={goBack} />;
   if (screen === 'about') return <SettingsPage screen={screen} back={goBack} />;
+  if (screen === 'readingStats') return <ReadingStats back={goBack} />;
+  if (screen === 'readerSettings') return <ReaderSettings back={goBack} />;
 
   const content = !libraryReady
     ? <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 }}><ActivityIndicator size="large" color="#8B70F7" /><Text style={{ color: isDark ? '#B8B1C2' : '#88838E' }}>正在加载漫画库…</Text></View>
     : tab === 'library'
       ? <Library series={series} importing={importing} refreshLibraries={refreshLibraries} openSeries={openSeries} continueSeries={continueSeries} openSources={() => setScreen('sources')} />
+      : tab === 'categories'
+        ? <Categories series={series} openSeries={openSeries} />
       : tab === 'recent'
-        ? <Recent series={series} openSeries={openSeries} clearHistory={id => progressRepository.clearHistory(id).then(refreshBooks).catch(console.warn)} />
+        ? <Recent series={series} openSeries={openSeries} clearHistory={id => progressRepository.clearHistory(id).then(refreshBooks).catch(console.warn)} statsSummary={statsSummary} openStats={() => setScreen('readingStats')} />
         : <Me navigate={setScreen} />;
 
   return <SafeAreaView style={{ flex: 1, backgroundColor: isDark ? '#111114' : '#F8F7FA' }}>

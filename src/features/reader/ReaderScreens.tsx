@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, BackHandler, DeviceEventEmitter, FlatList, Image, Modal, Pressable, ScrollView, StatusBar, Switch, Text, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, AppState, BackHandler, DeviceEventEmitter, FlatList, Image, Modal, Pressable, ScrollView, StatusBar, Switch, Text, View, useWindowDimensions } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import NativeSlider from '@react-native-community/slider';
@@ -8,7 +8,8 @@ import type { StoredBook, StoredChapter } from '../../domain/models';
 import { cropPageImage, type EpubComic, type EpubComicPage } from '../../content';
 import { contentLoader, contentLocatorFromBook } from '../../content/content-loader';
 import { libraryRepository } from '../../data/library-repository';
-import { loadReaderPreferences, saveReaderPreferences } from '../../preferences';
+import { readerSettingsRepository } from '../../data/reader-settings-repository';
+import { statsRepository } from '../../data/stats-repository';
 import { PageLoader } from '../../reader/page-loader';
 import { ReaderController } from '../../reader/reader-controller';
 import { BottomSheet } from '../../ui/components/bottom-sheet';
@@ -63,12 +64,29 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
   const { tokens, isDark: appIsDark } = useTheme();
   const [comic, setComic] = useState<EpubComic>(); const [error, setError] = useState(''); const [menu, setMenu] = useState(false); const [chapterDirectory, setChapterDirectory] = useState(false); const [settings, setSettings] = useState(false);
   const [readingDirection, setReadingDirection] = useState<'ltr' | 'rtl' | 'vertical'>('ltr'); const [tapZones, setTapZones] = useState(true); const [smooth, setSmooth] = useState(true); const [dark, setDark] = useState(true); const [crop, setCrop] = useState(false); const [notch, setNotch] = useState(false); const [volume, setVolume] = useState(true); const [pageMode, setPageMode] = useState<'single' | 'double'>('single'); const [doubleOrder, setDoubleOrder] = useState<'natural' | 'reverse'>('natural');
-  const [currentPage, setCurrentPage] = useState(0); const { width, height } = useWindowDimensions(); const insets = useSafeAreaInsets(); const [preferencesReady, setPreferencesReady] = useState(false); const preferredDirection = useRef<'ltr' | 'rtl' | 'vertical'>(); const sessionId = useRef('reader-' + Date.now().toString()).current; const listRef = useRef<FlatList<ReaderDisplayPage[]>>(null); const pageLoaderRef = useRef<PageLoader>(); const [pageLoader, setPageLoader] = useState<PageLoader>(); const readerControllerRef = useRef<ReaderController>(); const touchStart = useRef({ x: 0, y: 0, time: 0 }); const lastPrefetchGroup = useRef(-1); const lastProgress = useRef({ progress: book.progress, location: book.currentLocation || 'epub:0' });
+  const [currentPage, setCurrentPage] = useState(0); const { width, height } = useWindowDimensions(); const insets = useSafeAreaInsets(); const [preferencesReady, setPreferencesReady] = useState(false); const [bookOverrides, setBookOverrides] = useState<Partial<import('../../preferences').ReaderPreferences>>({}); const preferenceSnapshot = useRef<import('../../preferences').ReaderPreferences>({}); const preferredDirection = useRef<'ltr' | 'rtl' | 'vertical'>(); const sessionId = useRef('reader-' + Date.now().toString()).current; const readingSessionRef = useRef<{ id: number; lastPage: number }>(); const listRef = useRef<FlatList<ReaderDisplayPage[]>>(null); const pageLoaderRef = useRef<PageLoader>(); const [pageLoader, setPageLoader] = useState<PageLoader>(); const readerControllerRef = useRef<ReaderController>(); const touchStart = useRef({ x: 0, y: 0, time: 0 }); const lastPrefetchGroup = useRef(-1); const lastProgress = useRef({ progress: book.progress, location: book.currentLocation || 'epub:0' });
   useEffect(() => { StatusBar.setHidden(true, 'none'); return () => { StatusBar.setHidden(false, 'none'); }; }, []);
   useEffect(() => {
+    let foreground = AppState.currentState === 'active';
+    const heartbeat = setInterval(() => {
+      const session = readingSessionRef.current;
+      if (session && foreground) void statsRepository.pauseSession(session.id).catch(() => undefined);
+    }, 15000);
+    const subscription = AppState.addEventListener('change', state => {
+      const session = readingSessionRef.current;
+      const nextForeground = state === 'active';
+      if (session && foreground !== nextForeground) void (nextForeground ? statsRepository.resumeSession(session.id) : statsRepository.pauseSession(session.id)).catch(() => undefined);
+      foreground = nextForeground;
+    });
+    return () => { clearInterval(heartbeat); subscription.remove(); };
+  }, []);
+  useEffect(() => {
     let active = true;
-    loadReaderPreferences().then(preferences => {
+    Promise.all([readerSettingsRepository.loadGlobal(), readerSettingsRepository.loadBookOverrides(book.id)]).then(([globalPreferences, overrides]) => {
       if (!active) return;
+      const preferences = { ...globalPreferences, ...overrides };
+      preferenceSnapshot.current = preferences;
+      setBookOverrides(overrides);
       if (preferences.readingDirection) { preferredDirection.current = preferences.readingDirection; setReadingDirection(preferences.readingDirection); }
       if (preferences.tapZones !== undefined) setTapZones(preferences.tapZones);
       if (preferences.smooth !== undefined) setSmooth(preferences.smooth);
@@ -82,7 +100,32 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
     }).catch(() => active && setPreferencesReady(true));
     return () => { active = false; };
   }, []);
-  useEffect(() => { if (!preferencesReady) return; void saveReaderPreferences({ readingDirection, tapZones, smooth, dark, crop, notch, volume, pageMode, doubleOrder }).catch(console.warn); }, [preferencesReady, readingDirection, tapZones, smooth, dark, crop, notch, volume, pageMode, doubleOrder]);
+  useEffect(() => {
+    if (!preferencesReady) return;
+    const next = { readingDirection, tapZones, smooth, dark, crop, notch, volume, pageMode, doubleOrder };
+    const previous = preferenceSnapshot.current;
+    (Object.keys(next) as Array<keyof typeof next>).forEach(key => {
+      if (JSON.stringify(previous[key]) === JSON.stringify(next[key])) return;
+      preferenceSnapshot.current = { ...preferenceSnapshot.current, [key]: next[key] };
+      setBookOverrides(current => ({ ...current, [key]: next[key] }));
+      void readerSettingsRepository.saveBookOverride(book.id, key, next[key]).catch(console.warn);
+    });
+  }, [preferencesReady, readingDirection, tapZones, smooth, dark, crop, notch, volume, pageMode, doubleOrder, book.id]);
+  const resetBookPreferences = async () => {
+    await readerSettingsRepository.resetBookOverrides(book.id);
+    const globalPreferences = await readerSettingsRepository.loadGlobal();
+    preferenceSnapshot.current = globalPreferences;
+    setBookOverrides({});
+    if (globalPreferences.readingDirection) { preferredDirection.current = globalPreferences.readingDirection; setReadingDirection(globalPreferences.readingDirection); }
+    if (globalPreferences.tapZones !== undefined) setTapZones(globalPreferences.tapZones);
+    if (globalPreferences.smooth !== undefined) setSmooth(globalPreferences.smooth);
+    if (globalPreferences.dark !== undefined) setDark(globalPreferences.dark);
+    if (globalPreferences.crop !== undefined) setCrop(globalPreferences.crop);
+    if (globalPreferences.notch !== undefined) setNotch(globalPreferences.notch);
+    if (globalPreferences.volume !== undefined) setVolume(globalPreferences.volume);
+    if (globalPreferences.pageMode) setPageMode(globalPreferences.pageMode === 'double' ? 'double' : 'single');
+    if (globalPreferences.doubleOrder) setDoubleOrder(globalPreferences.doubleOrder);
+  };
   useEffect(() => {
     let active = true;
     setComic(undefined); setError(''); setCurrentPage(0);
@@ -102,14 +145,23 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
       pageLoaderRef.current = state.pageLoader; setPageLoader(state.pageLoader);
       setComic({ ...value, author: value.author || book.author || '未知作者' }); setReadingDirection(preferredDirection.current ?? value.direction); setCurrentPage(restoredPage); void libraryRepository.recordContentInfo(book.id, value.pages.length).catch(console.warn);
       void persistProgress(restoredPage / Math.max(1, value.pages.length - 1), book.format + ':' + restoredPage);
+      const seriesId = 'seriesId' in book ? Number((book as StoredChapter).seriesId) : 0;
+      if (seriesId > 0) void statsRepository.startSession({ bookId: book.id, seriesId }).then(id => {
+        if (!active) return statsRepository.finishSession(id);
+        readingSessionRef.current = { id, lastPage: restoredPage };
+        return statsRepository.recordPageViewed({ sessionId: id, bookId: book.id, pageIndex: restoredPage });
+      }).catch(() => undefined);
       void controller.goTo(restoredPage).catch(() => undefined);
     }).catch(reason => { void libraryRepository.recordContentInfo(book.id, 0, 'error').catch(console.warn); if (active) setError(reason instanceof Error ? reason.message : String(reason)); });
     return () => {
       active = false;
+      const readingSession = readingSessionRef.current;
+      readingSessionRef.current = undefined;
+      if (readingSession) void statsRepository.finishSession(readingSession.id).catch(() => undefined);
       if (readerControllerRef.current === controller) { readerControllerRef.current = undefined; pageLoaderRef.current = undefined; setPageLoader(undefined); }
       void controller.close().catch(console.warn);
     };
-  }, [book, width]);
+  }, [book, width, preferencesReady]);
   useEffect(() => { pageLoaderRef.current?.load(currentPage).catch(() => undefined); pageLoaderRef.current?.prefetchAround(currentPage); }, [currentPage]);
   const prefetchedChapters = useRef(new Set<number>());
   useEffect(() => {
@@ -144,7 +196,7 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
   const leaveReaderRef = useRef<() => Promise<void>>();
   leaveReaderRef.current = leaveReader;
   useEffect(() => { const subscription = BackHandler.addEventListener('hardwareBackPress', () => { void leaveReaderRef.current?.(); return true; }); return () => subscription.remove(); }, []);
-  const pageChanged = (page: number) => { if (!comic) return; const safe = Math.max(0, Math.min(comic.pages.length - 1, page)); setCurrentPage(safe); void persistProgress(safe / Math.max(1, comic.pages.length - 1), `${book.format}:${safe}`); };
+  const pageChanged = (page: number) => { if (!comic) return; const safe = Math.max(0, Math.min(comic.pages.length - 1, page)); setCurrentPage(safe); const readingSession = readingSessionRef.current; if (readingSession && readingSession.lastPage !== safe) { readingSession.lastPage = safe; void statsRepository.recordPageViewed({ sessionId: readingSession.id, bookId: book.id, pageIndex: safe }).catch(() => undefined); } void persistProgress(safe / Math.max(1, comic.pages.length - 1), `${book.format}:${safe}`); };
   const displayPages = useMemo<ReaderDisplayPage[]>(() => {
     if (!comic) return [];
     const pages = readingDirection === 'rtl' ? [...comic.pages].reverse() : comic.pages;
@@ -196,6 +248,7 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
   if (!comic) return <SafeAreaView style={styles.documentReader}><View style={styles.readerMessage}><ActivityIndicator color="#8B70F7" size="large" /><Text style={styles.readerChapter}>正在建立 {book.format.toUpperCase()} 页表…</Text></View></SafeAreaView>;
     return <View style={[styles.comicReader, { backgroundColor: dark ? '#09090B' : '#FFFFFF' }]}><StatusBar hidden barStyle={menuDark ? 'light-content' : 'dark-content'} /><FlatList ref={listRef} data={displayGroups} extraData={`${dark}:${menuDark}:${crop}:${pageMode}:${readingDirection}:${Object.keys(pageRatios).length}`} horizontal={readingDirection !== 'vertical'} pagingEnabled initialScrollIndex={toGroup(currentPage)} getItemLayout={(_, index) => ({ length: readingDirection === 'vertical' ? height : width, offset: (readingDirection === 'vertical' ? height : width) * index, index })} windowSize={5} initialNumToRender={3} maxToRenderPerBatch={4} updateCellsBatchingPeriod={16} removeClippedSubviews={false} keyExtractor={group => group.map(item => item.page.imageUri).join('|')} showsHorizontalScrollIndicator={false} showsVerticalScrollIndicator={false} renderItem={renderPageGroup} onScroll={event => { const axis = readingDirection === 'vertical' ? height : width; const offset = readingDirection === 'vertical' ? event.nativeEvent.contentOffset.y : event.nativeEvent.contentOffset.x; const groupIndex = Math.max(0, Math.min(displayGroups.length - 1, Math.round(offset / Math.max(1, axis)))); if (groupIndex === lastPrefetchGroup.current) return; lastPrefetchGroup.current = groupIndex; const firstDisplayIndex = groupIndex * (pageMode === 'single' ? 1 : 2); if (displayPages[firstDisplayIndex]) pageLoaderRef.current?.prefetchAround(toActual(firstDisplayIndex)); }} scrollEventThrottle={16} onTouchStart={event => { touchStart.current = { x: event.nativeEvent.pageX, y: event.nativeEvent.pageY, time: Date.now() }; }} onTouchEnd={event => { const start = touchStart.current; touchStart.current = { x: 0, y: 0, time: 0 }; const coordinate = readingDirection === 'vertical' ? event.nativeEvent.pageY : event.nativeEvent.pageX; if (Date.now() - start.time < 350 && Math.abs(event.nativeEvent.pageX - start.x) < 12 && Math.abs(event.nativeEvent.pageY - start.y) < 12) handleTap(coordinate); }} onMomentumScrollEnd={event => { const offset = readingDirection === 'vertical' ? event.nativeEvent.contentOffset.y : event.nativeEvent.contentOffset.x; const groupIndex = Math.round(offset / (readingDirection === 'vertical' ? height : width)); const firstDisplayIndex = groupIndex * (pageMode === 'single' ? 1 : 2); if (displayPages[firstDisplayIndex]) pageChanged(toActual(firstDisplayIndex)); }} />{menu && <><View style={[styles.readerTop, styles.readerMenuSurface, styles.readerOverlay, { paddingTop: notch ? Math.min(insets.top, 12) : 0, height: notch ? 76 : 66, backgroundColor: menuBackground }]}><IconButton name="chevron-back" onPress={back} color={menuPrimary} /><View style={styles.readerTopTitle}><Text numberOfLines={1} style={[styles.readerBook, { color: menuPrimary }]}>{comic.title}</Text><Text style={[styles.readerChapter, { color: menuMuted }]}>{comic.author} · {readingDirection === 'rtl' ? '从右到左' : readingDirection === 'vertical' ? '从上到下' : '从左到右'}</Text></View></View><View style={[styles.epubBottom, styles.readerMenuSurface, styles.readerOverlay, { backgroundColor: menuBackground }]}><Text numberOfLines={1} style={[styles.chapterLabel, { color: menuMuted }]}>{comic.title} · 整卷</Text><Slider style={styles.readerSlider} minimumValue={0} maximumValue={comic.pages.length - 1} step={1} value={currentPage} minimumTrackTintColor="#8B70F7" maximumTrackTintColor={menuTrack} thumbTintColor={menuPrimary} onSlidingComplete={value => goTo(value)} /><View style={styles.quickActions}><PressableScale haptic="selection" style={styles.quickAction} accessibilityRole="button" accessibilityLabel="章节目录" onPress={() => chapters.length ? setChapterDirectory(true) : navigateBack()}><Ionicons name="list-outline" size={21} color={menuPrimary} /></PressableScale><Text numberOfLines={1} style={[styles.epubCounter, { flex: 1, minWidth: 120, color: menuPrimary, fontSize: 14, lineHeight: 20, fontWeight: '800', textAlign: 'center', paddingHorizontal: 8 }]}>{`第 ${currentPage + 1} / ${comic.pages.length} 页`}</Text><PressableScale haptic="selection" style={styles.quickAction} accessibilityRole="button" accessibilityLabel="详细设置" onPress={() => setSettings(true)}><Ionicons name="options-outline" size={21} color={menuPrimary} /></PressableScale></View></View></>}
     <ChapterDirectorySheet visible={chapterDirectory} book={book} chapters={chapters} onClose={() => setChapterDirectory(false)} onSelectChapter={onSelectChapter} />
+    {settings && Object.keys(bookOverrides).length > 0 && <PressableScale haptic="light" accessibilityRole="button" accessibilityLabel="恢复全局默认" onPress={() => { void resetBookPreferences(); }} style={[styles.readerResetFloating, { top: Math.max(insets.top + 70, height * 0.1 + 68) }, settingsDark && uiStyles.readerResetButtonDark]}><Text style={[styles.readerResetText, settingsDark && uiStyles.readerResetTextDark]}>恢复全局默认</Text></PressableScale>}
     <BottomSheet visible={settings} onClose={() => setSettings(false)} maxHeight="90%"><View style={[pageLayoutStyles.readerSettingsContent, settingsDark && styles.sheetDark]}><ScrollView contentInsetAdjustmentBehavior="automatic" style={{ minHeight: 0, marginHorizontal: -tokens.spacing.lg }} contentContainerStyle={[pageLayoutStyles.readerSettingsScrollContent, { paddingHorizontal: tokens.spacing.lg }]} scrollIndicatorInsets={{ right: 0 }}><View style={styles.sheetHeading}><Text style={[styles.sheetTitle, settingsDark && styles.textPrimaryDark]}>详细阅读设置</Text><PressableScale haptic="light" accessibilityRole="button" accessibilityLabel="完成" onPress={() => setSettings(false)} style={{ minWidth: 44, minHeight: 44, alignItems: 'flex-end', justifyContent: 'center' }}><Text style={[styles.done, settingsDark && uiStyles.doneDark]}>完成</Text></PressableScale></View>{onSetCover && <PressableScale haptic="light" style={[styles.coverAction, settingsDark && uiStyles.coverActionDark]} onPress={() => { pageLoaderRef.current?.load(currentPage).then(result => { onSetCover(result.uri); setSettings(false); }).catch(console.warn); }}><Ionicons name="image-outline" size={20} color={settingsDark ? '#C8B9FF' : '#7257E7'} /><Text style={[styles.coverActionText, settingsDark && uiStyles.coverActionTextDark]}>将当前第 {currentPage + 1} 页设为作品封面</Text></PressableScale>}<Text style={[styles.settingSection, settingsDark && uiStyles.settingSectionDark]}>阅读方向</Text><OptionSet dark={settingsDark} values={['从左到右', '从右到左', '从上到下']} value={readingDirection === 'rtl' ? '从右到左' : readingDirection === 'vertical' ? '从上到下' : '从左到右'} onChange={changeDirection} /><Text style={[styles.modalHelp, settingsDark && styles.textMutedDark]}>屏幕点击区域功能示意</Text><View style={[styles.tapPreview, { marginTop: 8 }]}><View style={[styles.tapPreviewSide, settingsDark && uiStyles.tapPreviewSideDark]}><Text style={[styles.tapPreviewText, settingsDark && uiStyles.tapPreviewTextDark]}>{readingDirection === 'rtl' ? '下一页' : '上一页'}</Text></View><View style={[styles.tapPreviewCenter, settingsDark && uiStyles.tapPreviewCenterDark]}><Text style={[styles.tapPreviewText, settingsDark && uiStyles.tapPreviewTextDark]}>菜单</Text></View><View style={[styles.tapPreviewSide, settingsDark && uiStyles.tapPreviewSideDark]}><Text style={[styles.tapPreviewText, settingsDark && uiStyles.tapPreviewTextDark]}>{readingDirection === 'rtl' ? '上一页' : '下一页'}</Text></View></View><Text style={[styles.settingSection, settingsDark && uiStyles.settingSectionDark]}>翻页效果</Text><OptionSet dark={settingsDark} values={['直接翻页', '平滑翻页']} value={smooth ? '平滑翻页' : '直接翻页'} onChange={value => setSmooth(value === '平滑翻页')} /><Text style={[styles.settingSection, settingsDark && uiStyles.settingSectionDark]}>页面布局</Text><OptionSet dark={settingsDark} values={['单页', '双页']} value={pageMode === 'double' ? '双页' : '单页'} onChange={value => setPageMode(value === '双页' ? 'double' : 'single')} />{pageMode !== 'single' && <><Text style={[styles.settingSection, settingsDark && uiStyles.settingSectionDark]}>双页顺序</Text><OptionSet dark={settingsDark} values={['奇数在前', '偶数在前']} value={doubleOrder === 'reverse' ? '偶数在前' : '奇数在前'} onChange={value => setDoubleOrder(value === '偶数在前' ? 'reverse' : 'natural')} /></>}<View style={[styles.toggleRow, settingsDark && uiStyles.toggleRowDark]}><Text style={[styles.toggleText, settingsDark && uiStyles.toggleTextDark]}>自动裁切白边</Text><Switch value={crop} onValueChange={setCrop} trackColor={{ true: '#765BE8' }} /></View><View style={[styles.toggleRow, settingsDark && uiStyles.toggleRowDark]}><Text style={[styles.toggleText, settingsDark && uiStyles.toggleTextDark]}>点击区域翻页</Text><Switch value={tapZones} onValueChange={setTapZones} trackColor={{ true: '#765BE8' }} /></View><View style={[styles.toggleRow, settingsDark && uiStyles.toggleRowDark]}><Text style={[styles.toggleText, settingsDark && uiStyles.toggleTextDark]}>黑色阅读背景</Text><Switch value={dark} onValueChange={setDark} trackColor={{ true: '#765BE8' }} /></View><View style={[styles.toggleRow, settingsDark && uiStyles.toggleRowDark]}><Text style={[styles.toggleText, settingsDark && uiStyles.toggleTextDark]}>刘海区域显示内容</Text><Switch value={notch} onValueChange={setNotch} trackColor={{ true: '#765BE8' }} /></View></ScrollView></View></BottomSheet>
   </View>;
 }

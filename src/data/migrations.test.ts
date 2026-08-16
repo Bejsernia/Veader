@@ -46,7 +46,7 @@ describe('library schema migrations', () => {
 
     await expect(runLibraryMigrations(asSqliteDatabase(database))).resolves.toBe(CURRENT_LIBRARY_SCHEMA_VERSION);
 
-    expect(database.transactions).toBe(3);
+    expect(database.transactions).toBe(CURRENT_LIBRARY_SCHEMA_VERSION);
     expect(database.version).toBe(CURRENT_LIBRARY_SCHEMA_VERSION);
     expect(database.runs.some(item => item.sql.includes('schema_migrations'))).toBe(true);
   });
@@ -58,10 +58,10 @@ describe('library schema migrations', () => {
 
     await runLibraryMigrations(asSqliteDatabase(database));
 
-    expect(database.transactions).toBe(2);
-    expect(database.execs.some(sql => sql.includes('CREATE TABLE IF NOT EXISTS series'))).toBe(false);
+    expect(database.transactions).toBe(CURRENT_LIBRARY_SCHEMA_VERSION - 1);
+    expect(database.execs.some(sql => sql.includes('CREATE TABLE IF NOT EXISTS series ('))).toBe(false);
     expect(database.execs.some(sql => sql.includes('ALTER TABLE chapters ADD COLUMN remote_path'))).toBe(true);
-    expect(database.version).toBe(3);
+    expect(database.version).toBe(CURRENT_LIBRARY_SCHEMA_VERSION);
   });
 
   it('does not advance schema_meta when a migration fails', async () => {

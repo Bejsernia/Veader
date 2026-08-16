@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, AppState, Platform, Pressable, ScrollView, Text, TextInput, ToastAndroid, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, AppState, Platform, Pressable, ScrollView, Switch, Text, TextInput, ToastAndroid, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { AppScreen as Screen } from '../../app/navigation';
-import { ThemeMode } from '../../preferences';
+import { ThemeMode, type ReaderPreferences } from '../../preferences';
+import { readerSettingsRepository } from '../../data/reader-settings-repository';
 import { formatCacheSize } from '../../cache';
 import { cacheManager } from '../../data/cache-manager';
 import { useTheme } from '../../ui/theme';
@@ -13,8 +14,8 @@ import { getGridLayout } from '../../ui/layout';
 import type { StoredSource } from '../../domain/models';
 
 function Me({ navigate }: { navigate: (screen: Screen) => void }) {
-  const groups: [keyof typeof Ionicons.glyphMap, string][][] = [[['folder-open-outline', '漫画源'], ['cube-outline', '缓存']], [['information-circle-outline', '关于 Veader']]];
-  const destinations: Record<string, Screen> = { '漫画源': 'sources', '缓存': 'cache', '关于 Veader': 'about' };
+  const groups: [keyof typeof Ionicons.glyphMap, string][][] = [[['folder-open-outline', '漫画源'], ['cube-outline', '缓存'], ['options-outline', '阅读设置']], [['information-circle-outline', '关于 Veader']]];
+  const destinations: Record<string, Screen> = { '漫画源': 'sources', '缓存': 'cache', '阅读设置': 'readerSettings', '关于 Veader': 'about' };
   const { mode, isDark, setMode } = useTheme(); const { width: viewportWidth } = useWindowDimensions(); const pageInset = getGridLayout(viewportWidth).pageInset;
   const modeLabel = mode === 'system' ? '自动' : mode === 'dark' ? '黑夜' : '白天';
   const cycleTheme = () => {
@@ -25,6 +26,17 @@ function Me({ navigate }: { navigate: (screen: Screen) => void }) {
     else Alert.alert('界面主题', `已切换到${label}模式`);
   };
   return <View style={[styles.flex, isDark && styles.pageDark]}><ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={[styles.page, isDark && styles.pageDark, { paddingHorizontal: pageInset }]}><View style={[styles.header, pageLayoutStyles.pageHeader]}><Text style={[styles.title, pageLayoutStyles.pageTitle, isDark && styles.textPrimaryDark]}>我的</Text><Pressable accessibilityRole="button" accessibilityLabel={`切换界面主题，当前${modeLabel}`} style={[styles.themeButton, pageLayoutStyles.trailingAction, isDark && styles.themeButtonDark]} onPress={cycleTheme}><Ionicons name={mode === 'dark' ? 'moon' : mode === 'system' ? 'contrast' : 'sunny'} size={20} color={isDark ? '#5B21B6' : '#7257E7'} /></Pressable></View>{groups.map((group, groupIndex) => <View style={[styles.settingsGroup, pageLayoutStyles.alignedSettingsGroup, isDark && styles.cardDark]} key={groupIndex}>{group.map(([icon, label], index) => <Pressable accessibilityRole="button" key={label} onPress={() => navigate(destinations[label]!)} style={({ pressed }) => [styles.settingRow, pageLayoutStyles.alignedSettingRow, index < group.length - 1 && styles.divider, isDark && styles.dividerDark, pressed && styles.pressed]}><View style={styles.settingIcon}><Ionicons name={icon} size={20} color="#7257E7" /></View><Text style={[styles.settingLabel, isDark && styles.textPrimaryDark]}>{label}</Text><Ionicons name="chevron-forward" size={18} color={isDark ? '#B8B1C2' : '#AAA5B0'} /></Pressable>)}</View>)}</ScrollView></View>;
+}
+
+function ReaderSettingsPage({ back }: { back: () => void }) {
+  const { isDark } = useTheme();
+  const [settings, setSettings] = useState<ReaderPreferences>({ readingDirection: 'ltr', tapZones: true, smooth: true, dark: true, crop: false, notch: false, volume: true, pageMode: 'single', doubleOrder: 'natural' });
+  useEffect(() => { void readerSettingsRepository.loadGlobal().then(value => setSettings(current => ({ ...current, ...value }))).catch(console.warn); }, []);
+  const update = (key: keyof ReaderPreferences, value: unknown) => { setSettings(current => ({ ...current, [key]: value })); void readerSettingsRepository.saveGlobal({ [key]: value } as ReaderPreferences).catch(console.warn); };
+  const directionLabel = settings.readingDirection === 'rtl' ? '从右到左' : settings.readingDirection === 'vertical' ? '从上到下' : '从左到右';
+  const setDirection = (label: string) => update('readingDirection', label === '从右到左' ? 'rtl' : label === '从上到下' ? 'vertical' : 'ltr');
+  const Option = ({ values, value, onChange }: { values: string[]; value: string; onChange: (value: string) => void }) => <View style={[styles.segment, isDark && uiStyles.segmentDark]}>{values.map(item => <Pressable key={item} onPress={() => onChange(item)} style={[styles.segmentItem, value === item && styles.segmentActive, isDark && value === item && uiStyles.segmentActiveDark]}><Text style={[styles.segmentText, value === item && styles.segmentTextActive, isDark && value !== item && uiStyles.segmentTextDark]}>{item}</Text></Pressable>)}</View>;
+  return <SafeAreaView style={[styles.safe, isDark && styles.safeDark]}><ScrollView contentContainerStyle={[styles.page, isDark && styles.pageDark]}><View style={[styles.header, layoutStyles.subpageHeader]}><IconButton name="chevron-back" label="返回我的" onPress={back} /><Text style={[styles.navTitle, isDark && styles.textPrimaryDark]}>全局阅读设置</Text><View style={pageLayoutStyles.headerSpacer} /></View><Text style={[styles.meta, isDark && styles.textMutedDark]}>这些设置会作为每本书的默认值；书籍内的单独设置优先。</Text><Text style={[styles.settingSection, isDark && uiStyles.settingSectionDark]}>阅读方向</Text><Option values={['从左到右', '从右到左', '从上到下']} value={directionLabel} onChange={setDirection} /><Text style={[styles.settingSection, isDark && uiStyles.settingSectionDark]}>翻页效果</Text><Option values={['直接翻页', '平滑翻页']} value={settings.smooth ? '平滑翻页' : '直接翻页'} onChange={value => update('smooth', value === '平滑翻页')} /><Text style={[styles.settingSection, isDark && uiStyles.settingSectionDark]}>页面布局</Text><Option values={['单页', '双页']} value={settings.pageMode === 'double' ? '双页' : '单页'} onChange={value => update('pageMode', value === '双页' ? 'double' : 'single')} />{settings.pageMode === 'double' && <><Text style={[styles.settingSection, isDark && uiStyles.settingSectionDark]}>双页顺序</Text><Option values={['奇数在前', '偶数在前']} value={settings.doubleOrder === 'reverse' ? '偶数在前' : '奇数在前'} onChange={value => update('doubleOrder', value === '偶数在前' ? 'reverse' : 'natural')} /></>}<View style={[styles.toggleRow, isDark && uiStyles.toggleRowDark]}><Text style={[styles.toggleText, isDark && uiStyles.toggleTextDark]}>自动裁切白边</Text><Switch value={Boolean(settings.crop)} onValueChange={value => update('crop', value)} trackColor={{ true: '#765BE8' }} /></View><View style={[styles.toggleRow, isDark && uiStyles.toggleRowDark]}><Text style={[styles.toggleText, isDark && uiStyles.toggleTextDark]}>点击区域翻页</Text><Switch value={settings.tapZones !== false} onValueChange={value => update('tapZones', value)} trackColor={{ true: '#765BE8' }} /></View><View style={[styles.toggleRow, isDark && uiStyles.toggleRowDark]}><Text style={[styles.toggleText, isDark && uiStyles.toggleTextDark]}>黑色阅读背景</Text><Switch value={settings.dark !== false} onValueChange={value => update('dark', value)} trackColor={{ true: '#765BE8' }} /></View><View style={[styles.toggleRow, isDark && uiStyles.toggleRowDark]}><Text style={[styles.toggleText, isDark && uiStyles.toggleTextDark]}>刘海区域显示内容</Text><Switch value={Boolean(settings.notch)} onValueChange={value => update('notch', value)} trackColor={{ true: '#765BE8' }} /></View></ScrollView></SafeAreaView>;
 }
 
 function CacheSettings({ back }: { back: () => void }) {
@@ -47,4 +59,4 @@ function SettingsPage({ screen, back }: { screen: Screen; back: () => void }) {
   </ScrollView></SafeAreaView>;
 }
 
-export { Me, CacheSettings, SettingsPage };
+export { Me, CacheSettings, SettingsPage, ReaderSettingsPage };

@@ -29,7 +29,7 @@ export const libraryRepository: LibraryRepository = {
     if (!query?.search) return filtered;
     const search = query.search.trim().toLocaleLowerCase();
     if (!search) return filtered;
-    return filtered.filter(row => `${row.title} ${row.author} ${row.chapterSearchText}`.toLocaleLowerCase().includes(search));
+    return filtered.filter(row => `${row.title} ${row.author} ${row.tags.map(tag => tag.name).join(' ')} ${row.chapterSearchText}`.toLocaleLowerCase().includes(search));
   },
   async listChapters(seriesId) {
     return listChapters(seriesId);

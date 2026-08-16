@@ -1,7 +1,7 @@
 import type * as SQLite from 'expo-sqlite';
 
 export const LIBRARY_SCHEMA_NAME = 'library';
-export const CURRENT_LIBRARY_SCHEMA_VERSION = 3;
+export const CURRENT_LIBRARY_SCHEMA_VERSION = 6;
 
 export type Migration = {
   version: number;
@@ -119,6 +119,88 @@ export const libraryMigrations: Migration[] = [
       await db.runAsync('UPDATE chapters SET progress = 1 WHERE progress > 1');
       await db.runAsync('UPDATE series SET progress = 0 WHERE progress IS NULL OR progress < 0');
       await db.runAsync('UPDATE series SET progress = 1 WHERE progress > 1');
+    },
+  },
+  {
+    version: 4,
+    description: 'add author and general tags with user categories',
+    migrate: async db => {
+      await addColumn(db, 'series', "author_source TEXT NOT NULL DEFAULT 'metadata'");
+      await db.execAsync(`
+        CREATE TABLE IF NOT EXISTS tags (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          normalized_name TEXT NOT NULL UNIQUE,
+          kind TEXT NOT NULL CHECK(kind IN ('author','general')),
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS series_tags (
+          series_id INTEGER NOT NULL REFERENCES series(id) ON DELETE CASCADE,
+          tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+          source TEXT NOT NULL CHECK(source IN ('metadata','manual')),
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY(series_id, tag_id, source)
+        );
+        CREATE TABLE IF NOT EXISTS categories (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL UNIQUE,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS category_tags (
+          category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+          tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+          PRIMARY KEY(category_id, tag_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_tags_normalized ON tags(normalized_name);
+        CREATE INDEX IF NOT EXISTS idx_series_tags_tag ON series_tags(tag_id, series_id);
+        CREATE INDEX IF NOT EXISTS idx_category_tags_tag ON category_tags(tag_id, category_id);
+      `);
+      await db.runAsync("UPDATE series SET author_source = 'metadata' WHERE author_source IS NULL OR author_source = ''");
+    },
+  },
+  {
+    version: 5,
+    description: 'add per-book reader preference overrides',
+    migrate: async db => {
+      await db.execAsync(`
+        CREATE TABLE IF NOT EXISTS book_reader_settings (
+          book_id INTEGER PRIMARY KEY REFERENCES chapters(id) ON DELETE CASCADE,
+          settings_json TEXT NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+      `);
+    },
+  },
+  {
+    version: 6,
+    description: 'add reading sessions and page events for local statistics',
+    migrate: async db => {
+      await db.execAsync(`
+        CREATE TABLE IF NOT EXISTS reading_sessions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          book_id INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
+          series_id INTEGER NOT NULL REFERENCES series(id) ON DELETE CASCADE,
+          started_at INTEGER NOT NULL,
+          last_active_at INTEGER NOT NULL,
+          ended_at INTEGER,
+          active_duration_ms INTEGER NOT NULL DEFAULT 0,
+          pages_viewed INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS reading_page_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id INTEGER NOT NULL REFERENCES reading_sessions(id) ON DELETE CASCADE,
+          book_id INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
+          page_index INTEGER NOT NULL,
+          occurred_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_reading_sessions_time ON reading_sessions(started_at, ended_at);
+        CREATE INDEX IF NOT EXISTS idx_reading_sessions_book ON reading_sessions(book_id, started_at);
+        CREATE INDEX IF NOT EXISTS idx_reading_sessions_series ON reading_sessions(series_id, started_at);
+        CREATE INDEX IF NOT EXISTS idx_reading_events_book ON reading_page_events(book_id, occurred_at);
+        CREATE INDEX IF NOT EXISTS idx_reading_events_session ON reading_page_events(session_id, occurred_at);
+      `);
     },
   },
 ];

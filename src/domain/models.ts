@@ -49,6 +49,8 @@ export type LibrarySeries = {
   chapterSearchText: string;
   chapterCount: number;
   updatedAt: number;
+  tags: LibraryTag[];
+  authorSource?: 'metadata' | 'manual';
 };
 
 export type StoredChapter = StoredBook & {
@@ -60,8 +62,49 @@ export type StoredChapter = StoredBook & {
 export type LibraryQuery = {
   search?: string;
   sourceId?: number;
+  categoryId?: number;
+  tagId?: number;
   sort?: 'updated' | 'title' | 'progress';
 };
+
+export type TagKind = 'author' | 'general';
+export type TagRelationSource = 'metadata' | 'manual';
+
+export type LibraryTag = {
+  id: number;
+  name: string;
+  kind: TagKind;
+  sources: TagRelationSource[];
+};
+
+export type Category = {
+  id: number;
+  name: string;
+  tags: LibraryTag[];
+  bookCount: number;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type ReadingStatsRange = '7d' | '30d' | 'all';
+
+export type ReadingStatsSummary = {
+  range: ReadingStatsRange;
+  totalDurationMs: number;
+  totalPages: number;
+  sessionCount: number;
+  bookCount: number;
+  completedChapterCount: number;
+  completedSeriesCount: number;
+  daily: Array<{ key: string; label: string; durationMs: number; pages: number }>;
+  byFormat: Array<{ format: BookFormat; durationMs: number; pages: number }>;
+  byBook: Array<{ id: number; title: string; durationMs: number; pages: number; progress: number }>;
+  byAuthor: Array<{ name: string; durationMs: number; pages: number }>;
+  byTag: Array<{ id: number; name: string; durationMs: number; pages: number }>;
+};
+
+export type StartReadingSession = { bookId: number; seriesId: number; now?: number };
+export type PageViewedEvent = { sessionId: number; bookId: number; pageIndex: number; now?: number };
 
 export type RefreshResult = {
   sourceId: number;

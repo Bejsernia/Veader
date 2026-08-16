@@ -6,6 +6,9 @@ import { SeriesLibrary as LibraryScreen, SeriesDetail as SeriesDetailScreen, Rec
 import { Me as MeScreen, CacheSettings as CacheScreen, SettingsPage as AboutScreen } from './src/features/settings/SettingsScreens';
 import { Sources as SourcesScreen } from './src/features/sources/SourcesScreen';
 import { DocumentReader as ReaderScreen } from './src/features/reader/ReaderScreens';
+import { CategoriesScreen } from './src/features/categories/CategoriesScreen';
+import { ReadingStatsScreen } from './src/features/stats/ReadingStatsScreen';
+import { ReaderSettingsPage } from './src/features/settings/SettingsScreens';
 import { ThemeProvider } from './src/ui/theme';
 
 export default function App() {
@@ -14,6 +17,7 @@ export default function App() {
       <ThemeProvider>
         <AppShell features={{
           Library: LibraryScreen,
+          Categories: CategoriesScreen,
           Recent: RecentScreen,
           Me: MeScreen,
           SeriesDetail: SeriesDetailScreen,
@@ -21,6 +25,8 @@ export default function App() {
           Sources: SourcesScreen,
           CacheSettings: CacheScreen,
           SettingsPage: AboutScreen,
+          ReadingStats: ReadingStatsScreen,
+          ReaderSettings: ReaderSettingsPage,
         }} />
       </ThemeProvider>
     </GestureHandlerRootView>
