@@ -66,3 +66,18 @@ export const layoutStyles = StyleSheet.create({
 export const uiStyles = StyleSheet.create({
   loadingState: { alignItems: 'center', justifyContent: 'center', gap: 12 }, searchDark: { backgroundColor: '#27232D' }, searchInputDark: { color: '#F4F0F8' }, folderButtonDark: { backgroundColor: '#2A2530' }, sourceStatusDark: { color: '#D5C9FF' }, settingSectionDark: { color: '#C4BBCF' }, chapterNumberDark: { backgroundColor: '#342E3B' }, chapterCurrentRowDark: { backgroundColor: '#292336', borderLeftColor: '#A78BFA' }, chapterCurrentTitleDark: { color: '#C8B9FF' }, chapterCurrentMetaDark: { color: '#B9A5FF' }, chapterNumberTextDark: { color: '#F4F0F8' }, cacheInputDark: { backgroundColor: '#211C29', color: '#FFFFFF', borderWidth: 1, borderColor: '#6B5AA5' }, dangerButtonDark: { backgroundColor: '#3A2229' }, dangerTextDark: { color: '#F5A9B7' }, segmentDark: { backgroundColor: '#2A2530' }, segmentActiveDark: { backgroundColor: '#3A3158' }, segmentTextDark: { color: '#D8D0E2' }, segmentTextActiveDark: { color: '#E9DDFF' }, inputDark: { backgroundColor: '#2A2530', color: '#F4F0F8' }, toggleRowDark: { borderBottomColor: '#342E3B' }, toggleTextDark: { color: '#F4F0F8' }, coverActionDark: { backgroundColor: '#30274A' }, coverActionTextDark: { color: '#C8B9FF' }, doneDark: { color: '#B9A5FF' }, readerResetButtonDark: { backgroundColor: '#30274A' }, readerResetTextDark: { color: '#C8B9FF' }, tapPreviewSideDark: { backgroundColor: '#2A2530' }, tapPreviewCenterDark: { backgroundColor: '#3A3158' }, tapPreviewTextDark: { color: '#E1D8EA' },
 });
+
+export const statsChartAdjustments = StyleSheet.create({
+  dailyChartInset: { marginLeft: -8 },
+});
+
+export const categoryUiStyles = StyleSheet.create({
+  centeredHeader: { alignItems: 'center' },
+  sectionHeading: { marginTop: 24 },
+  automaticGroupHeading: { marginTop: 24, marginBottom: 0 },
+  automaticTagHeading: { marginTop: 24, marginBottom: 0 },
+  categoryDetailTags: { marginTop: 18, marginBottom: 0 },
+  categoryDetailCount: { marginTop: 8, marginBottom: 20 },
+  seriesSettingsGroup: { marginTop: 16, paddingHorizontal: 0, overflow: 'hidden' },
+  seriesSettingsRow: { paddingHorizontal: 16, minHeight: 62 },
+});

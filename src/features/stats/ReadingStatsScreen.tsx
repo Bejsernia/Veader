@@ -6,7 +6,7 @@ import type { ReadingStatsRange, ReadingStatsSummary } from '../../domain/models
 import { statsRepository } from '../../data/stats-repository';
 import { PressableScale } from '../../ui/components/pressable-scale';
 import { useTheme } from '../../ui/theme';
-import { styles, layoutStyles, pageLayoutStyles, statsChartStyles, uiStyles } from '../../ui/legacy-styles';
+import { styles, layoutStyles, pageLayoutStyles, statsChartAdjustments, statsChartStyles, uiStyles } from '../../ui/legacy-styles';
 import { IconButton } from '../shared/library-ui';
 import { normalizeDailyRows } from './chart-utils';
 
@@ -87,7 +87,7 @@ function DailyBars({ summary, isDark }: { summary: ReadingStatsSummary; isDark: 
     <Text style={[styles.meta, isDark && styles.textMutedDark]}>开始阅读后这里会显示每日趋势</Text>
   </View>;
 
-  return <View style={statsChartStyles.dailyChart}>
+  return <View style={[statsChartStyles.dailyChart, statsChartAdjustments.dailyChartInset]}>
     <View style={statsChartStyles.dailyYAxis}>
       <Text style={[statsChartStyles.dailyAxisUnit, isDark && statsChartStyles.dailyAxisTextDark]}>分钟</Text>
       <View style={statsChartStyles.dailyYAxisTicks}>
@@ -151,7 +151,6 @@ export function ReadingStatsScreen({ back }: { back: () => void }) {
         <View style={[styles.statsPanel, isDark && styles.cardDark]}><Text style={[styles.sectionTitle, isDark && styles.textPrimaryDark]}>按作品</Text><BarList isDark={isDark} rows={summary.byBook.map(row => ({ name: row.title, value: row.durationMs, detail: `${row.pages} 页 · ${Math.round(row.progress * 100)}%`, }))} /></View>
         <View style={[styles.statsPanel, isDark && styles.cardDark]}><Text style={[styles.sectionTitle, isDark && styles.textPrimaryDark]}>按 tag</Text><BarList isDark={isDark} rows={summary.byTag.map(row => ({ name: row.name, value: row.durationMs, detail: `${row.pages} 页`, }))} /></View>
         <View style={[styles.statsPanel, isDark && styles.cardDark]}><Text style={[styles.sectionTitle, isDark && styles.textPrimaryDark]}>按作者</Text><BarList isDark={isDark} rows={summary.byAuthor.map(row => ({ name: row.name, value: row.durationMs, detail: `${row.pages} 页`, }))} /></View>
-        <View style={[styles.statsPanel, isDark && styles.cardDark]}><Text style={[styles.sectionTitle, isDark && styles.textPrimaryDark]}>按格式</Text><BarList isDark={isDark} rows={summary.byFormat.map(row => ({ name: row.format.toUpperCase(), value: row.durationMs, detail: `${row.pages} 页`, }))} /></View>
       </>}
     </ScrollView>
   </SafeAreaView>;
