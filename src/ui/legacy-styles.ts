@@ -40,7 +40,7 @@ export const categoryStyles = StyleSheet.create({
 export const statsChartStyles = StyleSheet.create({
   dailyChart: { flexDirection: 'row', alignItems: 'flex-start', marginTop: 24 },
   dailyYAxis: { width: 34, height: 152, marginRight: 8, position: 'relative' },
-  dailyAxisUnit: { position: 'absolute', top: -20, left: 0, color: '#807A86', fontSize: 9, lineHeight: 14 },
+  dailyAxisUnit: { position: 'absolute', top: -20, left: 0, width: 34, color: '#807A86', fontSize: 9, lineHeight: 14, textAlign: 'right' },
   dailyYAxisTicks: { height: 128, justifyContent: 'space-between' },
   dailyAxisText: { color: '#807A86', fontSize: 9, lineHeight: 14, textAlign: 'right' },
   dailyAxisTextDark: { color: '#B8B1C2' },
