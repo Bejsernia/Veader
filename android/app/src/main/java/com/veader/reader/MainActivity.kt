@@ -14,7 +14,7 @@ import expo.modules.ReactActivityDelegateWrapper
 
 class MainActivity : ReactActivity() {
   override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-    if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+    if (VolumeKeyPagingController.enabled && (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)) {
       val direction = if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) "up" else "down"
       reactNativeHost.reactInstanceManager.currentReactContext
         ?.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)

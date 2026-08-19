@@ -17,6 +17,7 @@ import { PressableScale } from '../../ui/components/pressable-scale';
 import { useTheme } from '../../ui/theme';
 import { styles, pageLayoutStyles, uiStyles } from '../../ui/legacy-styles';
 import { IconButton } from '../shared/library-ui';
+import { setVolumeKeyPagingEnabled } from '../../platform/volume-keys';
 
 let comicDarkTheme = true;
 let comicRtlTheme = false;
@@ -111,6 +112,11 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
       void readerSettingsRepository.saveBookOverride(book.id, key, next[key]).catch(console.warn);
     });
   }, [preferencesReady, readingDirection, tapZones, smooth, dark, crop, notch, volume, pageMode, doubleOrder, book.id]);
+  useEffect(() => {
+    if (!preferencesReady) return;
+    setVolumeKeyPagingEnabled(volume);
+    return () => setVolumeKeyPagingEnabled(false);
+  }, [preferencesReady, volume]);
   const resetBookPreferences = async () => {
     await readerSettingsRepository.resetBookOverrides(book.id);
     const globalPreferences = await readerSettingsRepository.loadGlobal();
@@ -122,7 +128,7 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
     if (globalPreferences.dark !== undefined) setDark(globalPreferences.dark);
     if (globalPreferences.crop !== undefined) setCrop(globalPreferences.crop);
     if (globalPreferences.notch !== undefined) setNotch(globalPreferences.notch);
-    if (globalPreferences.volume !== undefined) setVolume(globalPreferences.volume);
+    setVolume(globalPreferences.volume ?? true);
     if (globalPreferences.pageMode) setPageMode(globalPreferences.pageMode === 'double' ? 'double' : 'single');
     if (globalPreferences.doubleOrder) setDoubleOrder(globalPreferences.doubleOrder);
   };
