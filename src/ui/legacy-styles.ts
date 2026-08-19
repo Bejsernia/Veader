@@ -76,7 +76,6 @@ export const categoryUiStyles = StyleSheet.create({
   sectionHeading: { marginTop: 24 },
   automaticGroupHeading: { marginTop: 24, marginBottom: 0 },
   automaticTagHeading: { marginTop: 24, marginBottom: 0 },
-  categoryDetailTags: { marginTop: 18, marginBottom: 0 },
   categoryDetailCount: { marginTop: 8, marginBottom: 20 },
   seriesSettingsGroup: { marginTop: 16, paddingHorizontal: 0, overflow: 'hidden' },
   seriesSettingsRow: { paddingHorizontal: 16, minHeight: 62 },

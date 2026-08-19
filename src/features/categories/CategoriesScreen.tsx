@@ -16,10 +16,10 @@ import { SeriesProgress, IconButton } from '../shared/library-ui';
 type Props = { series: LibrarySeries[]; openSeries: (series: LibrarySeries) => void };
 type DisplayCategory = Category & { automatic?: boolean };
 
-function TagChip({ tag, selected, onPress, showIcon = true }: { tag: LibraryTag; selected?: boolean; onPress?: () => void; showIcon?: boolean }) {
+function TagChip({ tag, selected, onPress }: { tag: LibraryTag; selected?: boolean; onPress?: () => void }) {
   const { isDark } = useTheme();
   return <PressableScale onPress={onPress} accessibilityRole={onPress ? 'button' : undefined} style={[styles.tagChip, selected && styles.tagChipActive, isDark && styles.tagChipDark, isDark && selected && styles.tagChipActiveDark]}>
-    {showIcon && <Ionicons name={tag.kind === 'author' ? 'person-outline' : 'pricetag-outline'} size={13} color={selected ? '#fff' : isDark ? '#C8B9FF' : '#7257E7'} />}
+    <Ionicons name={tag.kind === 'author' ? 'person-outline' : 'pricetag-outline'} size={13} color={selected ? '#fff' : isDark ? '#C8B9FF' : '#7257E7'} />
     <Text numberOfLines={1} style={[styles.tagChipText, selected && styles.tagChipTextActive, isDark && !selected && styles.textMutedDark]}>{tag.name}</Text>
   </PressableScale>;
 }
@@ -152,7 +152,6 @@ export function CategoriesScreen({ series, openSeries }: Props) {
           <Text numberOfLines={1} style={[styles.navTitle, isDark && styles.textPrimaryDark]}>{selected.name}</Text>
           {!selected.automatic ? <PressableScale accessibilityRole="button" accessibilityLabel="编辑分类" onPress={() => openEditor(selected)} style={pageLayoutStyles.trailingAction}><Ionicons name="create-outline" size={21} color={isDark ? '#C8B9FF' : '#7257E7'} /></PressableScale> : <View style={pageLayoutStyles.headerSpacer} />}
         </View>
-        <View style={[styles.tagList, categoryUiStyles.categoryDetailTags]}>{selected.tags.map(tag => <TagChip key={tag.id} tag={tag} showIcon={false} />)}</View>
         <Text style={[styles.meta, categoryUiStyles.categoryDetailCount, isDark && styles.textMutedDark]}>{selectedSeries.length} 部作品</Text>
       </View>}
       renderItem={({ item, index }) => <View style={{ width: grid.cardWidth, marginBottom: grid.gutter }}><BookCard title={item.title} author={item.author} coverUri={item.coverUri} index={index} onPress={() => openSeries(item)} footer={<SeriesProgress series={item} compact />} /></View>}
