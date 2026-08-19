@@ -26,7 +26,11 @@ export function PressableScale({ haptic: _haptic = 'none', scale = 0.97, onPress
 
   const resolvedStyle = typeof style === 'function' ? style({ pressed }) : style;
   const flattenedStyle = StyleSheet.flatten(resolvedStyle) as ViewStyle | undefined;
-  const interactionStyle = [{ width: flattenedStyle?.width, height: flattenedStyle?.height, borderRadius: flattenedStyle?.borderRadius }];
+  const interactionStyle = [{
+    width: typeof flattenedStyle?.width === 'number' ? flattenedStyle.width : undefined,
+    height: typeof flattenedStyle?.height === 'number' ? flattenedStyle.height : undefined,
+    borderRadius: flattenedStyle?.borderRadius,
+  }];
   const contentStyle: ViewStyle = {
     flexDirection: flattenedStyle?.flexDirection ?? 'column',
     alignItems: flattenedStyle?.alignItems,
