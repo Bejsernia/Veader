@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, BackHandler, DeviceEventEmitter, FlatList, Image, Modal, Pressable, ScrollView, StatusBar, Switch, Text, View, useWindowDimensions } from 'react-native';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { ActivityIndicator, AppState, BackHandler, DeviceEventEmitter, FlatList, Image, Modal, PixelRatio, Pressable, ScrollView, StatusBar, Switch, Text, View, useWindowDimensions } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, { cancelAnimation, runOnJS, useAnimatedStyle, useSharedValue, withDecay, withSpring, withTiming } from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import NativeSlider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
@@ -61,6 +62,93 @@ function OptionSet({ values, value, onChange, dark }: { values: string[]; value:
   return <View style={[styles.segment, isDark && uiStyles.segmentDark]}>{values.map(v => <PressableScale haptic="selection" key={v} onPress={() => onChange(v)} style={[styles.segmentItem, value === v && styles.segmentActive, isDark && value === v && uiStyles.segmentActiveDark]}><Text style={[styles.segmentText, value === v && styles.segmentTextActive, isDark && value !== v && uiStyles.segmentTextDark, isDark && value === v && uiStyles.segmentTextActiveDark]}>{v}</Text></PressableScale>)}</View>;
 }
 
+function ZoomablePage({ width, height, active, children, onZoomChange, onTap, tapAxis = 'horizontal' }: { width: number; height: number; active: boolean; children: React.ReactNode; onZoomChange?: (zoomed: boolean) => void; onTap?: (coordinate: number) => void; tapAxis?: 'horizontal' | 'vertical' }) {
+  const { reducedMotion, tokens } = useTheme();
+  const scale = useSharedValue(1);
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const startScale = useSharedValue(1);
+  const startTranslateX = useSharedValue(0);
+  const startTranslateY = useSharedValue(0);
+  const startFocalX = useSharedValue(0);
+  const startFocalY = useSharedValue(0);
+  const [zoomed, setZoomed] = useState(false);
+
+  const boundX = (value: number) => Math.max(0, (width * value - width) / 2);
+  const boundY = (value: number) => Math.max(0, (height * value - height) / 2);
+  const clamp = (value: number, limit: number) => Math.max(-limit, Math.min(limit, value));
+  const notifyZoom = (value: boolean) => { setZoomed(value); onZoomChange?.(value); };
+
+  useEffect(() => {
+    if (active) return;
+    cancelAnimation(scale);
+    cancelAnimation(translateX);
+    cancelAnimation(translateY);
+    const duration = reducedMotion ? 80 : tokens.motion.normal;
+    scale.value = withTiming(1, { duration });
+    translateX.value = withTiming(0, { duration });
+    translateY.value = withTiming(0, { duration });
+    if (zoomed) notifyZoom(false);
+  }, [active, reducedMotion, tokens.motion.normal, scale, translateX, translateY, zoomed]);
+
+  const pinch = Gesture.Pinch()
+    .onStart(event => {
+      cancelAnimation(scale);
+      cancelAnimation(translateX);
+      cancelAnimation(translateY);
+      startScale.value = scale.value;
+      startTranslateX.value = translateX.value;
+      startTranslateY.value = translateY.value;
+      startFocalX.value = event.focalX;
+      startFocalY.value = event.focalY;
+    })
+    .onUpdate(event => {
+      const nextScale = Math.max(1, Math.min(4, startScale.value * event.scale));
+      const contentX = (startFocalX.value - width / 2 - startTranslateX.value) / startScale.value;
+      const contentY = (startFocalY.value - height / 2 - startTranslateY.value) / startScale.value;
+      scale.value = nextScale;
+      translateX.value = clamp(event.focalX - width / 2 - contentX * nextScale, boundX(nextScale));
+      translateY.value = clamp(event.focalY - height / 2 - contentY * nextScale, boundY(nextScale));
+    })
+    .onEnd(() => {
+      if (scale.value < 1.03) {
+        scale.value = withSpring(1);
+        translateX.value = withSpring(0);
+        translateY.value = withSpring(0);
+        runOnJS(notifyZoom)(false);
+      } else {
+        runOnJS(notifyZoom)(true);
+      }
+    });
+
+  const pan = Gesture.Pan()
+    .enabled(zoomed)
+    .maxPointers(1)
+    .minDistance(2)
+    .onStart(() => {
+      cancelAnimation(translateX);
+      cancelAnimation(translateY);
+      startTranslateX.value = translateX.value;
+      startTranslateY.value = translateY.value;
+    })
+    .onUpdate(event => {
+      translateX.value = clamp(startTranslateX.value + event.translationX, boundX(scale.value));
+      translateY.value = clamp(startTranslateY.value + event.translationY, boundY(scale.value));
+    })
+    .onEnd(event => {
+      translateX.value = withDecay({ velocity: event.velocityX, deceleration: 0.994, clamp: [-boundX(scale.value), boundX(scale.value)] });
+      translateY.value = withDecay({ velocity: event.velocityY, deceleration: 0.994, clamp: [-boundY(scale.value), boundY(scale.value)] });
+    });
+
+  const tap = Gesture.Tap().enabled(active).maxDuration(350).maxDistance(12).onEnd(event => {
+    const coordinate = tapAxis === 'vertical' ? event.y : event.x;
+    runOnJS(onTap ?? (() => undefined))(coordinate);
+  });
+  const gesture = Gesture.Exclusive(tap, Gesture.Simultaneous(pinch, pan));
+  const animatedStyle = useAnimatedStyle(() => ({ transform: [{ translateX: translateX.value }, { translateY: translateY.value }, { scale: scale.value }] }));
+  return <View style={{ width, height, overflow: 'hidden' }}><GestureDetector gesture={gesture}><Animated.View style={[{ width, height, alignItems: 'center', justifyContent: 'center' }, animatedStyle]}>{children}</Animated.View></GestureDetector></View>;
+}
+
 function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, chapters = [], onSelectChapter }: { book: StoredBook; back: () => void; onProgress?: (progress: number, location: string) => void | Promise<void>; onSetCover?: (uri: string) => void; chapters?: StoredChapter[]; onSelectChapter?: (chapter: StoredChapter) => void }) {
   const { tokens, isDark: appIsDark } = useTheme();
   const [comic, setComic] = useState<EpubComic>(); const [error, setError] = useState(''); const [menu, setMenu] = useState(false); const [chapterDirectory, setChapterDirectory] = useState(false); const [settings, setSettings] = useState(false);
@@ -68,6 +156,9 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
   const [currentPage, setCurrentPage] = useState(0); const { width, height } = useWindowDimensions(); const insets = useSafeAreaInsets(); const [preferencesReady, setPreferencesReady] = useState(false); const [bookOverrides, setBookOverrides] = useState<Partial<import('../../preferences').ReaderPreferences>>({}); const preferenceSnapshot = useRef<import('../../preferences').ReaderPreferences>({}); const preferredDirection = useRef<'ltr' | 'rtl' | 'vertical'>(); const sessionId = useRef('reader-' + Date.now().toString()).current; const readingSessionRef = useRef<{ id: number; lastPage: number }>(); const listRef = useRef<FlatList<ReaderDisplayPage[]>>(null); const pageLoaderRef = useRef<PageLoader>(); const [pageLoader, setPageLoader] = useState<PageLoader>(); const readerControllerRef = useRef<ReaderController>(); const touchStart = useRef({ x: 0, y: 0, time: 0 }); const lastPrefetchGroup = useRef(-1); const lastProgress = useRef({ progress: book.progress, location: book.currentLocation || 'epub:0' });
   const dragStartGroup = useRef(-1);
   const dragStartOffset = useRef(0);
+  const zoomedRef = useRef(false);
+  const [zoomed, setZoomed] = useState(false);
+  const multiTouch = useRef(false);
   useEffect(() => { StatusBar.setHidden(true, 'none'); return () => { StatusBar.setHidden(false, 'none'); }; }, []);
   useEffect(() => {
     let foreground = AppState.currentState === 'active';
@@ -227,7 +318,7 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
   const goTo = (actual: number, animated = smooth) => { if (!comic) return; if (actual >= comic.pages.length) return changeChapter(1); if (actual < 0) return changeChapter(-1); const safe = Math.max(0, Math.min(comic.pages.length - 1, actual)); listRef.current?.scrollToIndex({ index: toGroup(safe), animated }); pageChanged(safe); };
   const groupIndexForOffset = (offset: number) => Math.max(0, Math.min(displayGroups.length - 1, Math.round(offset / Math.max(1, readingDirection === 'vertical' ? height : width))));
   const handleEdgeRelease = (event: { nativeEvent: { contentOffset: { x: number; y: number }; velocity?: { x?: number; y?: number } } }) => {
-    if (!comic || !displayGroups.length) return;
+    if (zoomedRef.current || !comic || !displayGroups.length) return;
     const offset = readingDirection === 'vertical' ? event.nativeEvent.contentOffset.y : event.nativeEvent.contentOffset.x;
     const groupIndex = groupIndexForOffset(offset);
     if (groupIndex !== dragStartGroup.current) return;
@@ -238,7 +329,7 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
     if (groupIndex === displayGroups.length - 1 && movingNext) changeChapter(1);
     else if (groupIndex === 0 && movingPrevious) changeChapter(-1);
   };
-  const handleTap = (coordinate: number) => { if (!comic) return; const axisLength = readingDirection === 'vertical' ? height : width; if (!tapZones) return setMenu(!menu); if (coordinate >= axisLength / 3 && coordinate <= axisLength * 2 / 3) return setMenu(!menu); const next = readingDirection === 'vertical' ? coordinate > axisLength * 2 / 3 : readingDirection === 'rtl' ? coordinate < axisLength / 3 : coordinate > axisLength * 2 / 3; if (next && currentPage >= comic.pages.length - 1) return changeChapter(1); if (!next && currentPage <= 0) return changeChapter(-1); goTo(currentPage + (next ? 1 : -1)); };
+  const handleTap = (coordinate: number) => { if (menu || zoomedRef.current || !comic) return; const axisLength = readingDirection === 'vertical' ? height : width; if (!Number.isFinite(coordinate)) return setMenu(!menu); const normalizedCoordinate = coordinate > axisLength * 1.5 ? coordinate / PixelRatio.get() : coordinate; if (!tapZones) return setMenu(!menu); if (normalizedCoordinate >= axisLength / 3 && normalizedCoordinate <= axisLength * 2 / 3) return setMenu(!menu); const next = readingDirection === 'vertical' ? normalizedCoordinate > axisLength * 2 / 3 : readingDirection === 'rtl' ? normalizedCoordinate < axisLength / 3 : normalizedCoordinate > axisLength * 2 / 3; if (next && currentPage >= comic.pages.length - 1) return changeChapter(1); if (!next && currentPage <= 0) return changeChapter(-1); goTo(currentPage + (next ? 1 : -1)); };
   const changeDirection = (value: string) => { const direction = value === '从右到左' ? 'rtl' : value === '从上到下' ? 'vertical' : 'ltr'; comicRtlTheme = direction === 'rtl'; setReadingDirection(direction); setTimeout(() => listRef.current?.scrollToIndex({ index: toGroup(currentPage), animated: false }), 0); };
   useEffect(() => { const subscription = DeviceEventEmitter.addListener('veaderVolumeKey', (key: string) => { if (!volume) return; goTo(currentPage + (key === 'up' ? -1 : 1)); }); return () => subscription.remove(); }, [volume, currentPage, comic, smooth]);
   comicRtlTheme = readingDirection === 'rtl'; comicDarkTheme = dark;
@@ -255,19 +346,20 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
   const menuTrack = menuDark ? '#55515B' : '#D0CBD8';
   const [pageRatios, setPageRatios] = useState<Record<string, number>>({});
   const reportPageAspectRatio = useCallback((pageKey: string, ratio: number) => { setPageRatios(previous => previous[pageKey] === ratio ? previous : { ...previous, [pageKey]: ratio }); }, []);
-  const renderPageGroup = ({ item }: { item: ReaderDisplayPage[] }) => {
+  const renderPageGroup = ({ item, index: groupIndex }: { item: ReaderDisplayPage[]; index: number }) => {
     const isVertical = readingDirection === 'vertical';
+    const activeGroup = toGroup(currentPage);
     const ratios = item.map(display => pageRatios[display.page.imageUri] ?? 0.68);
     const totalRatio = isVertical ? ratios.reduce((sum, ratio) => sum + 1 / Math.max(0.1, ratio), 0) : ratios.reduce((sum, ratio) => sum + ratio, 0);
     const scale = isVertical ? Math.min(width, height / Math.max(0.1, totalRatio)) : Math.min(height, width / Math.max(0.1, totalRatio));
     const sizes = ratios.map(ratio => isVertical ? { width: scale, height: scale / Math.max(0.1, ratio) } : { width: scale * ratio, height: scale });
     const contentWidth = isVertical ? scale : sizes.reduce((sum, size) => sum + size.width, 0);
     const contentHeight = isVertical ? sizes.reduce((sum, size) => sum + size.height, 0) : scale;
-    return <View style={{ width, height, alignItems: 'center', justifyContent: 'center', padding: 0, margin: 0 }}><View style={{ width: contentWidth, height: contentHeight, flexDirection: isVertical ? 'column' : 'row', alignItems: 'center', justifyContent: 'center', padding: 0, margin: 0 }}>{item.map((display, index) => { const size = sizes[index]!; return <View key={display.page.imageUri} style={{ width: size.width, height: size.height, margin: 0, padding: 0, overflow: 'hidden' }}><EpubPageView book={book} page={display.page} width={size.width} height={size.height} crop={crop} dark={dark} sessionId={sessionId} pageLoader={pageLoader} onAspectRatio={reportPageAspectRatio} /></View>; })}</View></View>;
+    return <View style={{ width, height, alignItems: 'center', justifyContent: 'center', padding: 0, margin: 0 }}><View style={{ width: contentWidth, height: contentHeight, flexDirection: isVertical ? 'column' : 'row', alignItems: 'center', justifyContent: 'center', padding: 0, margin: 0 }}>{item.map((display, pageIndex) => { const size = sizes[pageIndex]!; return <View key={display.page.imageUri} style={{ width: size.width, height: size.height, margin: 0, padding: 0, overflow: 'hidden' }}><ZoomablePage width={size.width} height={size.height} active={groupIndex === activeGroup} tapAxis={isVertical ? 'vertical' : 'horizontal'} onZoomChange={value => { if (groupIndex === activeGroup) { zoomedRef.current = value; setZoomed(value); } }} onTap={handleTap}><EpubPageView book={book} page={display.page} width={size.width} height={size.height} crop={crop} dark={dark} sessionId={sessionId} pageLoader={pageLoader} onAspectRatio={reportPageAspectRatio} /></ZoomablePage></View>; })}</View></View>;
   };
   if (error) return <SafeAreaView style={styles.documentReader}><View style={styles.documentTop}><IconButton name="chevron-back" onPress={back} dark /><Text style={styles.readerBook}>{book.title}</Text></View><View style={styles.readerMessage}><Ionicons name="warning-outline" size={38} color="#E1915F" /><Text style={styles.errorText}>{error}</Text></View></SafeAreaView>;
   if (!comic) return <SafeAreaView style={styles.documentReader}><View style={styles.readerMessage}><ActivityIndicator color="#8B70F7" size="large" /><Text style={styles.readerChapter}>正在建立 {book.format.toUpperCase()} 页表…</Text></View></SafeAreaView>;
-    return <View style={[styles.comicReader, { backgroundColor: dark ? '#09090B' : '#FFFFFF' }]}><StatusBar hidden barStyle={menuDark ? 'light-content' : 'dark-content'} /><FlatList ref={listRef} data={displayGroups} extraData={`${dark}:${menuDark}:${crop}:${pageMode}:${readingDirection}:${Object.keys(pageRatios).length}`} horizontal={readingDirection !== 'vertical'} pagingEnabled initialScrollIndex={toGroup(currentPage)} getItemLayout={(_, index) => ({ length: readingDirection === 'vertical' ? height : width, offset: (readingDirection === 'vertical' ? height : width) * index, index })} windowSize={5} initialNumToRender={3} maxToRenderPerBatch={4} updateCellsBatchingPeriod={16} removeClippedSubviews={false} keyExtractor={group => group.map(item => item.page.imageUri).join('|')} showsHorizontalScrollIndicator={false} showsVerticalScrollIndicator={false} renderItem={renderPageGroup} onScrollBeginDrag={event => { const offset = readingDirection === 'vertical' ? event.nativeEvent.contentOffset.y : event.nativeEvent.contentOffset.x; dragStartOffset.current = offset; dragStartGroup.current = groupIndexForOffset(offset); }} onScrollEndDrag={handleEdgeRelease} onScroll={event => { const axis = readingDirection === 'vertical' ? height : width; const offset = readingDirection === 'vertical' ? event.nativeEvent.contentOffset.y : event.nativeEvent.contentOffset.x; const groupIndex = Math.max(0, Math.min(displayGroups.length - 1, Math.round(offset / Math.max(1, axis)))); if (groupIndex === lastPrefetchGroup.current) return; lastPrefetchGroup.current = groupIndex; const firstDisplayIndex = groupIndex * (pageMode === 'single' ? 1 : 2); if (displayPages[firstDisplayIndex]) pageLoaderRef.current?.prefetchAround(toActual(firstDisplayIndex)); }} scrollEventThrottle={16} onTouchStart={event => { touchStart.current = { x: event.nativeEvent.pageX, y: event.nativeEvent.pageY, time: Date.now() }; }} onTouchEnd={event => { const start = touchStart.current; touchStart.current = { x: 0, y: 0, time: 0 }; const coordinate = readingDirection === 'vertical' ? event.nativeEvent.pageY : event.nativeEvent.pageX; if (Date.now() - start.time < 350 && Math.abs(event.nativeEvent.pageX - start.x) < 12 && Math.abs(event.nativeEvent.pageY - start.y) < 12) handleTap(coordinate); }} onMomentumScrollEnd={event => { const offset = readingDirection === 'vertical' ? event.nativeEvent.contentOffset.y : event.nativeEvent.contentOffset.x; const groupIndex = Math.round(offset / (readingDirection === 'vertical' ? height : width)); const firstDisplayIndex = groupIndex * (pageMode === 'single' ? 1 : 2); if (displayPages[firstDisplayIndex]) pageChanged(toActual(firstDisplayIndex)); }} />{menu && <><View style={[styles.readerTop, styles.readerMenuSurface, styles.readerOverlay, { paddingTop: notch ? Math.min(insets.top, 12) : 0, height: notch ? 76 : 66, backgroundColor: menuBackground }]}><IconButton name="chevron-back" onPress={back} color={menuPrimary} /><View style={styles.readerTopTitle}><Text numberOfLines={1} style={[styles.readerBook, { color: menuPrimary }]}>{comic.title}</Text><Text style={[styles.readerChapter, { color: menuMuted }]}>{comic.author} · {readingDirection === 'rtl' ? '从右到左' : readingDirection === 'vertical' ? '从上到下' : '从左到右'}</Text></View></View><View style={[styles.epubBottom, styles.readerMenuSurface, styles.readerOverlay, { backgroundColor: menuBackground }]}><Text numberOfLines={1} style={[styles.chapterLabel, { color: menuMuted }]}>{comic.title} · 整卷</Text><Slider style={styles.readerSlider} minimumValue={0} maximumValue={comic.pages.length - 1} step={1} value={currentPage} minimumTrackTintColor="#8B70F7" maximumTrackTintColor={menuTrack} thumbTintColor={menuPrimary} onSlidingComplete={value => goTo(value)} /><View style={styles.quickActions}><PressableScale haptic="selection" style={styles.quickAction} accessibilityRole="button" accessibilityLabel="章节目录" onPress={() => chapters.length ? setChapterDirectory(true) : navigateBack()}><Ionicons name="list-outline" size={21} color={menuPrimary} /></PressableScale><Text numberOfLines={1} style={[styles.epubCounter, { flex: 1, minWidth: 120, color: menuPrimary, fontSize: 14, lineHeight: 20, fontWeight: '800', textAlign: 'center', paddingHorizontal: 8 }]}>{`第 ${currentPage + 1} / ${comic.pages.length} 页`}</Text><PressableScale haptic="selection" style={styles.quickAction} accessibilityRole="button" accessibilityLabel="详细设置" onPress={() => setSettings(true)}><Ionicons name="options-outline" size={21} color={menuPrimary} /></PressableScale></View></View></>}
+    return <View style={[styles.comicReader, { backgroundColor: dark ? '#09090B' : '#FFFFFF' }]}><StatusBar hidden barStyle={menuDark ? 'light-content' : 'dark-content'} /><FlatList ref={listRef} data={displayGroups} extraData={`${dark}:${menuDark}:${crop}:${pageMode}:${readingDirection}:${Object.keys(pageRatios).length}:${zoomed}`} scrollEnabled={!zoomed} horizontal={readingDirection !== 'vertical'} pagingEnabled initialScrollIndex={toGroup(currentPage)} getItemLayout={(_, index) => ({ length: readingDirection === 'vertical' ? height : width, offset: (readingDirection === 'vertical' ? height : width) * index, index })} windowSize={5} initialNumToRender={3} maxToRenderPerBatch={4} updateCellsBatchingPeriod={16} removeClippedSubviews={false} keyExtractor={group => group.map(item => item.page.imageUri).join('|')} showsHorizontalScrollIndicator={false} showsVerticalScrollIndicator={false} renderItem={renderPageGroup} onScrollBeginDrag={event => { const offset = readingDirection === 'vertical' ? event.nativeEvent.contentOffset.y : event.nativeEvent.contentOffset.x; dragStartOffset.current = offset; dragStartGroup.current = groupIndexForOffset(offset); }} onScrollEndDrag={handleEdgeRelease} onScroll={event => { const axis = readingDirection === 'vertical' ? height : width; const offset = readingDirection === 'vertical' ? event.nativeEvent.contentOffset.y : event.nativeEvent.contentOffset.x; const groupIndex = Math.max(0, Math.min(displayGroups.length - 1, Math.round(offset / Math.max(1, axis)))); if (groupIndex === lastPrefetchGroup.current) return; lastPrefetchGroup.current = groupIndex; const firstDisplayIndex = groupIndex * (pageMode === 'single' ? 1 : 2); if (displayPages[firstDisplayIndex]) pageLoaderRef.current?.prefetchAround(toActual(firstDisplayIndex)); }} scrollEventThrottle={16} onTouchStart={event => { const touches = (event.nativeEvent as unknown as { touches?: unknown[] }).touches; if (touches && touches.length > 1) multiTouch.current = true; else if (!multiTouch.current) touchStart.current = { x: event.nativeEvent.locationX, y: event.nativeEvent.locationY, time: Date.now() }; }} onTouchMove={event => { const touches = (event.nativeEvent as unknown as { touches?: unknown[] }).touches; if (touches && touches.length > 1) multiTouch.current = true; }} onTouchEnd={event => { const start = touchStart.current; touchStart.current = { x: 0, y: 0, time: 0 }; const wasMultiTouch = multiTouch.current; if (wasMultiTouch) { multiTouch.current = false; return; } const coordinate = readingDirection === 'vertical' ? event.nativeEvent.locationY : event.nativeEvent.locationX; if (Date.now() - start.time < 350 && Math.abs(event.nativeEvent.locationX - start.x) < 12 && Math.abs(event.nativeEvent.locationY - start.y) < 12) handleTap(coordinate); }} onMomentumScrollEnd={event => { if (zoomedRef.current) return; const offset = readingDirection === 'vertical' ? event.nativeEvent.contentOffset.y : event.nativeEvent.contentOffset.x; const groupIndex = Math.round(offset / (readingDirection === 'vertical' ? height : width)); const firstDisplayIndex = groupIndex * (pageMode === 'single' ? 1 : 2); if (displayPages[firstDisplayIndex]) pageChanged(toActual(firstDisplayIndex)); }} />{menu && <><View style={[styles.readerTop, styles.readerMenuSurface, styles.readerOverlay, { paddingTop: notch ? Math.min(insets.top, 12) : 0, height: notch ? 76 : 66, backgroundColor: menuBackground }]}><IconButton name="chevron-back" onPress={back} color={menuPrimary} /><View style={styles.readerTopTitle}><Text numberOfLines={1} style={[styles.readerBook, { color: menuPrimary }]}>{comic.title}</Text><Text style={[styles.readerChapter, { color: menuMuted }]}>{comic.author} · {readingDirection === 'rtl' ? '从右到左' : readingDirection === 'vertical' ? '从上到下' : '从左到右'}</Text></View></View><View style={[styles.epubBottom, styles.readerMenuSurface, styles.readerOverlay, { backgroundColor: menuBackground }]}><Text numberOfLines={1} style={[styles.chapterLabel, { color: menuMuted }]}>{comic.title} · 整卷</Text><Slider style={styles.readerSlider} minimumValue={0} maximumValue={comic.pages.length - 1} step={1} value={currentPage} minimumTrackTintColor="#8B70F7" maximumTrackTintColor={menuTrack} thumbTintColor={menuPrimary} onSlidingComplete={value => goTo(value)} /><View style={styles.quickActions}><PressableScale haptic="selection" style={styles.quickAction} accessibilityRole="button" accessibilityLabel="章节目录" onPress={() => chapters.length ? setChapterDirectory(true) : navigateBack()}><Ionicons name="list-outline" size={21} color={menuPrimary} /></PressableScale><Text numberOfLines={1} style={[styles.epubCounter, { flex: 1, minWidth: 120, color: menuPrimary, fontSize: 14, lineHeight: 20, fontWeight: '800', textAlign: 'center', paddingHorizontal: 8 }]}>{`第 ${currentPage + 1} / ${comic.pages.length} 页`}</Text><PressableScale haptic="selection" style={styles.quickAction} accessibilityRole="button" accessibilityLabel="详细设置" onPress={() => setSettings(true)}><Ionicons name="options-outline" size={21} color={menuPrimary} /></PressableScale></View></View></>}
     <ChapterDirectorySheet visible={chapterDirectory} book={book} chapters={chapters} onClose={() => setChapterDirectory(false)} onSelectChapter={onSelectChapter} />
     {settings && Object.keys(bookOverrides).length > 0 && <PressableScale haptic="light" accessibilityRole="button" accessibilityLabel="恢复全局默认" onPress={() => { void resetBookPreferences(); }} style={[styles.readerResetFloating, { top: Math.max(insets.top + 70, height * 0.1 + 68) }, settingsDark && uiStyles.readerResetButtonDark]}><Text style={[styles.readerResetText, settingsDark && uiStyles.readerResetTextDark]}>恢复全局默认</Text></PressableScale>}
     <BottomSheet visible={settings} onClose={() => setSettings(false)} maxHeight="90%"><View style={[pageLayoutStyles.readerSettingsContent, settingsDark && styles.sheetDark]}><ScrollView contentInsetAdjustmentBehavior="automatic" style={{ minHeight: 0, marginHorizontal: -tokens.spacing.lg }} contentContainerStyle={[pageLayoutStyles.readerSettingsScrollContent, { paddingHorizontal: tokens.spacing.lg }]} scrollIndicatorInsets={{ right: 0 }}><View style={styles.sheetHeading}><Text style={[styles.sheetTitle, settingsDark && styles.textPrimaryDark]}>详细阅读设置</Text><PressableScale haptic="light" accessibilityRole="button" accessibilityLabel="完成" onPress={() => setSettings(false)} style={{ minWidth: 44, minHeight: 44, alignItems: 'flex-end', justifyContent: 'center' }}><Text style={[styles.done, settingsDark && uiStyles.doneDark]}>完成</Text></PressableScale></View>{onSetCover && <PressableScale haptic="light" style={[styles.coverAction, settingsDark && uiStyles.coverActionDark]} onPress={() => { pageLoaderRef.current?.load(currentPage).then(result => { onSetCover(result.uri); setSettings(false); }).catch(console.warn); }}><Ionicons name="image-outline" size={20} color={settingsDark ? '#C8B9FF' : '#7257E7'} /><Text style={[styles.coverActionText, settingsDark && uiStyles.coverActionTextDark]}>将当前第 {currentPage + 1} 页设为作品封面</Text></PressableScale>}<Text style={[styles.settingSection, settingsDark && uiStyles.settingSectionDark]}>阅读方向</Text><OptionSet dark={settingsDark} values={['从左到右', '从右到左', '从上到下']} value={readingDirection === 'rtl' ? '从右到左' : readingDirection === 'vertical' ? '从上到下' : '从左到右'} onChange={changeDirection} /><Text style={[styles.modalHelp, settingsDark && styles.textMutedDark]}>屏幕点击区域功能示意</Text><View style={[styles.tapPreview, { marginTop: 8 }]}><View style={[styles.tapPreviewSide, settingsDark && uiStyles.tapPreviewSideDark]}><Text style={[styles.tapPreviewText, settingsDark && uiStyles.tapPreviewTextDark]}>{readingDirection === 'rtl' ? '下一页' : '上一页'}</Text></View><View style={[styles.tapPreviewCenter, settingsDark && uiStyles.tapPreviewCenterDark]}><Text style={[styles.tapPreviewText, settingsDark && uiStyles.tapPreviewTextDark]}>菜单</Text></View><View style={[styles.tapPreviewSide, settingsDark && uiStyles.tapPreviewSideDark]}><Text style={[styles.tapPreviewText, settingsDark && uiStyles.tapPreviewTextDark]}>{readingDirection === 'rtl' ? '上一页' : '下一页'}</Text></View></View><Text style={[styles.settingSection, settingsDark && uiStyles.settingSectionDark]}>翻页效果</Text><OptionSet dark={settingsDark} values={['直接翻页', '平滑翻页']} value={smooth ? '平滑翻页' : '直接翻页'} onChange={value => setSmooth(value === '平滑翻页')} /><Text style={[styles.settingSection, settingsDark && uiStyles.settingSectionDark]}>页面布局</Text><OptionSet dark={settingsDark} values={['单页', '双页']} value={pageMode === 'double' ? '双页' : '单页'} onChange={value => setPageMode(value === '双页' ? 'double' : 'single')} />{pageMode !== 'single' && <><Text style={[styles.settingSection, settingsDark && uiStyles.settingSectionDark]}>双页顺序</Text><OptionSet dark={settingsDark} values={['奇数在前', '偶数在前']} value={doubleOrder === 'reverse' ? '偶数在前' : '奇数在前'} onChange={value => setDoubleOrder(value === '偶数在前' ? 'reverse' : 'natural')} /></>}<View style={[styles.toggleRow, settingsDark && uiStyles.toggleRowDark]}><Text style={[styles.toggleText, settingsDark && uiStyles.toggleTextDark]}>自动裁切白边</Text><Switch value={crop} onValueChange={setCrop} trackColor={{ true: '#765BE8' }} /></View><View style={[styles.toggleRow, settingsDark && uiStyles.toggleRowDark]}><Text style={[styles.toggleText, settingsDark && uiStyles.toggleTextDark]}>点击区域翻页</Text><Switch value={tapZones} onValueChange={setTapZones} trackColor={{ true: '#765BE8' }} /></View><View style={[styles.toggleRow, settingsDark && uiStyles.toggleRowDark]}><Text style={[styles.toggleText, settingsDark && uiStyles.toggleTextDark]}>黑色阅读背景</Text><Switch value={dark} onValueChange={setDark} trackColor={{ true: '#765BE8' }} /></View><View style={[styles.toggleRow, settingsDark && uiStyles.toggleRowDark]}><Text style={[styles.toggleText, settingsDark && uiStyles.toggleTextDark]}>刘海区域显示内容</Text><Switch value={notch} onValueChange={setNotch} trackColor={{ true: '#765BE8' }} /></View><View style={[styles.toggleRow, settingsDark && uiStyles.toggleRowDark]}><Text style={[styles.toggleText, settingsDark && uiStyles.toggleTextDark]}>音量键翻页</Text><Switch accessibilityLabel="音量键翻页" value={volume} onValueChange={setVolume} trackColor={{ true: '#765BE8' }} /></View></ScrollView></View></BottomSheet>
