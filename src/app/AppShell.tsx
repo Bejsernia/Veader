@@ -9,6 +9,7 @@ import { progressRepository } from '../data/progress-repository';
 import { statsRepository } from '../data/stats-repository';
 import { BottomTabBar } from '../ui/components/bottom-tab-bar';
 import { useTheme } from '../ui/theme';
+import { setNavigationBarAppearance } from '../platform/system-bars';
 
 export type LibraryFeatureProps = {
   series: LibrarySeries[];
@@ -59,7 +60,7 @@ export type FeatureComponents = {
 };
 
 export function AppShell({ features }: { features: FeatureComponents }) {
-  const { isDark } = useTheme();
+  const { isDark, tokens } = useTheme();
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<Tab>('library');
   const [screen, setScreen] = useState<Screen>('main');
@@ -70,6 +71,10 @@ export function AppShell({ features }: { features: FeatureComponents }) {
   const [selectedSeries, setSelectedSeries] = useState<LibrarySeries>();
   const [seriesChapters, setSeriesChapters] = useState<StoredChapter[]>([]);
   const [statsSummary, setStatsSummary] = useState<ReadingStatsSummary>();
+
+  useEffect(() => {
+    setNavigationBarAppearance(tokens.colors.background, !isDark);
+  }, [isDark, tokens.colors.background]);
 
   const refreshBooks = async (refreshMetadata = false) => {
     setSeries(await libraryRepository.listSeries(refreshMetadata ? { refreshMetadata: true } : undefined));
@@ -219,8 +224,8 @@ export function AppShell({ features }: { features: FeatureComponents }) {
         ? <Recent series={series} openSeries={openSeries} clearHistory={id => progressRepository.clearHistory(id).then(() => refreshBooks()).catch(console.warn)} statsSummary={statsSummary} openStats={() => setScreen('readingStats')} />
         : <Me navigate={setScreen} />;
 
-  return <SafeAreaView style={{ flex: 1, backgroundColor: isDark ? '#111114' : '#F8F7FA' }}>
-    <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={isDark ? '#111114' : '#F8F7FA'} />
+  return <SafeAreaView style={{ flex: 1, backgroundColor: tokens.colors.background }}>
+    <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={tokens.colors.background} />
     <View style={{ flex: 1, paddingBottom: 82 + insets.bottom }}>{content}</View>
     <BottomTabBar tabs={appTabs.map(item => ({ key: item.key, label: item.label, icon: item.icon }))} value={tab} onChange={key => setTab(key as Tab)} />
   </SafeAreaView>;

@@ -1,6 +1,5 @@
 import React from 'react';
 import { Text, View } from 'react-native';
-import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme';
@@ -10,11 +9,10 @@ export type BottomTab = { key: string; label: string; icon: keyof typeof Ionicon
 type Props = { tabs: BottomTab[]; value: string; onChange: (key: string) => void };
 
 export function BottomTabBar({ tabs, value, onChange }: Props) {
-  const { tokens, isDark } = useTheme();
+  const { tokens } = useTheme();
   const insets = useSafeAreaInsets();
   const barHeight = 74 + insets.bottom;
-  return <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, width: '100%', height: barHeight, alignSelf: 'stretch', overflow: 'hidden', borderTopWidth: 1, borderTopColor: tokens.colors.divider }}>
-    <BlurView intensity={isDark ? 38 : 55} tint={isDark ? 'dark' : 'light'} style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }} />
+  return <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, width: '100%', height: barHeight, alignSelf: 'stretch', overflow: 'hidden', borderTopWidth: 1, borderTopColor: tokens.colors.divider, backgroundColor: tokens.colors.background }}>
     <View style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, flexDirection: 'row', paddingTop: tokens.spacing.sm, paddingBottom: Math.max(insets.bottom, tokens.spacing.sm) }}>
       {tabs.map(tab => {
         const active = tab.key === value;
