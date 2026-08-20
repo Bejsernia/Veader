@@ -31,8 +31,9 @@ export type RecentFeatureProps = {
 export type ReaderFeatureProps = {
   book: StoredBook;
   chapters: StoredChapter[];
+  initialPosition?: 'start' | 'end';
   back: () => void;
-  onSelectChapter: (chapter: StoredChapter) => void | Promise<void>;
+  onSelectChapter: (chapter: StoredChapter, position?: 'start' | 'end') => void | Promise<void>;
   onProgress: (progress: number, location: string) => void | Promise<void>;
   onSetCover: (uri: string) => void | Promise<void>;
 };
@@ -65,6 +66,7 @@ export function AppShell({ features }: { features: FeatureComponents }) {
   const [tab, setTab] = useState<Tab>('library');
   const [screen, setScreen] = useState<Screen>('main');
   const [selectedStored, setSelectedStored] = useState<StoredBook>();
+  const [readerInitialPosition, setReaderInitialPosition] = useState<'start' | 'end'>();
   const [importing, setImporting] = useState(false);
   const [libraryReady, setLibraryReady] = useState(false);
   const [series, setSeries] = useState<LibrarySeries[]>([]);
@@ -147,10 +149,11 @@ export function AppShell({ features }: { features: FeatureComponents }) {
     setScreen('seriesDetail');
   };
 
-  const openChapter = async (chapter: StoredChapter, owner: LibrarySeries | undefined = selectedSeries) => {
+  const openChapter = async (chapter: StoredChapter, owner: LibrarySeries | undefined = selectedSeries, position?: 'start' | 'end') => {
     setImporting(true);
     try {
       const localChapter = await libraryRepository.ensureChapterLocal(chapter);
+      setReaderInitialPosition(position);
       setSelectedStored({ ...localChapter, author: owner?.author || localChapter.author || '' });
       setScreen('document');
     } catch (reason) {
@@ -182,7 +185,8 @@ export function AppShell({ features }: { features: FeatureComponents }) {
       key={selectedStored.id}
       book={selectedStored}
       chapters={seriesChapters}
-      onSelectChapter={chapter => openChapter(chapter, selectedSeries)}
+      initialPosition={readerInitialPosition}
+      onSelectChapter={(chapter, position) => openChapter(chapter, selectedSeries, position)}
       back={goBack}
       onProgress={(progress, location) => {
         if (!('seriesId' in selectedStored)) return;
