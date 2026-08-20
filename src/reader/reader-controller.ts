@@ -4,6 +4,7 @@ import { PageLoader } from './page-loader';
 
 export type ReaderControllerOptions = {
   openChapter: (book: StoredBook, sessionId: string) => Promise<ContentSession>;
+  takePreloadedChapter?: (book: StoredBook) => Promise<ContentSession | undefined>;
   targetWidth: number;
   prefetchDistance?: number;
   concurrency?: number;
@@ -40,7 +41,7 @@ export class ReaderController {
     const generation = ++this.generation;
     await this.closeCurrent();
     const sessionId = 'reader-' + book.id + '-' + Date.now();
-    const session = await this.options.openChapter(book, sessionId);
+    const session = await this.options.takePreloadedChapter?.(book) ?? await this.options.openChapter(book, sessionId);
     if (generation !== this.generation) {
       await session.close();
       throw new Error('阅读章节切换已取消');

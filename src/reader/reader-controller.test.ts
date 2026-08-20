@@ -41,4 +41,27 @@ describe('ReaderController', () => {
     expect(closed).toBe(1);
     expect(controller.getState()).toBeUndefined();
   });
+
+  it('uses a preloaded chapter session before opening a new one', async () => {
+    let regularOpens = 0;
+    let closed = 0;
+    const session: ContentSession = {
+      comic: { title: '预加载', author: '', direction: 'ltr', pages: [{ index: 0, imageUri: 'entry-0' }] },
+      info: { title: '预加载', author: '', direction: 'ltr', pageCount: 1 },
+      getPage: async index => ({ index, uri: 'file:///preloaded.jpg' }),
+      prefetch: async () => undefined,
+      retry: async index => ({ index, uri: 'file:///preloaded.jpg' }),
+      close: async () => { closed += 1; },
+    };
+    const controller = new ReaderController({
+      openChapter: async () => { regularOpens += 1; return session; },
+      takePreloadedChapter: async () => session,
+      targetWidth: 1200,
+    });
+
+    await controller.open(book());
+    expect(regularOpens).toBe(0);
+    await controller.close();
+    expect(closed).toBe(1);
+  });
 });
