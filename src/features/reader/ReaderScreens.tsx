@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, BackHandler, DeviceEventEmitter, FlatList, Image, Modal, PanResponder, PixelRatio, Pressable, ScrollView, StatusBar, Switch, Text, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, AppState, BackHandler, DeviceEventEmitter, FlatList, Image, InteractionManager, Modal, PanResponder, PixelRatio, Pressable, ScrollView, StatusBar, Switch, Text, View, useWindowDimensions } from 'react-native';
 import Animated, { cancelAnimation, useAnimatedStyle, useSharedValue, withDecay, withSpring, withTiming } from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import NativeSlider from '@react-native-community/slider';
@@ -196,14 +196,14 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
   const { tokens, isDark: appIsDark } = useTheme();
   const [comic, setComic] = useState<EpubComic>(); const [error, setError] = useState(''); const [menu, setMenu] = useState(false); const [chapterDirectory, setChapterDirectory] = useState(false); const [settings, setSettings] = useState(false);
   const [readingDirection, setReadingDirection] = useState<'ltr' | 'rtl' | 'vertical'>('ltr'); const [tapZones, setTapZones] = useState(true); const [smooth, setSmooth] = useState(true); const [dark, setDark] = useState(true); const [crop, setCrop] = useState(false); const [notch, setNotch] = useState(false); const [volume, setVolume] = useState(true); const [pageMode, setPageMode] = useState<'single' | 'double'>('single'); const [doubleOrder, setDoubleOrder] = useState<'natural' | 'reverse'>('natural');
-  const [currentPage, setCurrentPage] = useState(0); const currentPageRef = useRef(0); const { width, height } = useWindowDimensions(); const insets = useSafeAreaInsets(); const [preferencesReady, setPreferencesReady] = useState(false); const [bookOverrides, setBookOverrides] = useState<Partial<import('../../preferences').ReaderPreferences>>({}); const preferenceSnapshot = useRef<import('../../preferences').ReaderPreferences>({}); const preferredDirection = useRef<'ltr' | 'rtl' | 'vertical'>(); const sessionId = useRef('reader-' + Date.now().toString()).current; const readingSessionRef = useRef<{ id: number; lastPage: number }>(); const listRef = useRef<FlatList<ReaderDisplayPage[]>>(null); const pageLoaderRef = useRef<PageLoader>(); const [pageLoader, setPageLoader] = useState<PageLoader>(); const readerControllerRef = useRef<ReaderController>(); const touchStart = useRef({ x: 0, y: 0, time: 0 }); const touchLatest = useRef({ x: 0, y: 0 }); const lastTouchMovement = useRef(0); const lastPrefetchGroup = useRef(-1); const lastProgress = useRef({ progress: book.progress, location: book.currentLocation || 'epub:0' });
+  const [currentPage, setCurrentPage] = useState(0); const currentPageRef = useRef(0); const committedPageRef = useRef(0); const { width, height } = useWindowDimensions(); const insets = useSafeAreaInsets(); const [preferencesReady, setPreferencesReady] = useState(false); const [bookOverrides, setBookOverrides] = useState<Partial<import('../../preferences').ReaderPreferences>>({}); const preferenceSnapshot = useRef<import('../../preferences').ReaderPreferences>({}); const preferredDirection = useRef<'ltr' | 'rtl' | 'vertical'>(); const sessionId = useRef('reader-' + Date.now().toString()).current; const readingSessionRef = useRef<{ id: number; lastPage: number }>(); const listRef = useRef<FlatList<ReaderDisplayPage[]>>(null); const pageLoaderRef = useRef<PageLoader>(); const [pageLoader, setPageLoader] = useState<PageLoader>(); const readerControllerRef = useRef<ReaderController>(); const touchStart = useRef({ x: 0, y: 0, time: 0 }); const touchLatest = useRef({ x: 0, y: 0 }); const lastProgress = useRef({ progress: book.progress, location: book.currentLocation || 'epub:0' });
   const dragStartGroup = useRef(-1);
   const dragStartOffset = useRef(0);
   const zoomedRef = useRef(false);
   const [zoomed, setZoomed] = useState(false);
   const multiTouch = useRef(false);
   const lastHandledTap = useRef({ coordinate: Number.NaN, time: 0 });
-  const pendingChapterId = useRef<number>();
+  const chapterTransitionRef = useRef<{ targetId: number; delta: -1 | 1 }>();
   useEffect(() => { StatusBar.setHidden(true, 'none'); return () => { StatusBar.setHidden(false, 'none'); }; }, []);
   useEffect(() => {
     if (!comic) return;
@@ -300,7 +300,7 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
           ? value.pages.length - 1
           : Math.max(0, Math.min(value.pages.length - 1, restoredLocation ? Number(restoredLocation[1]) : Math.round(book.progress * (value.pages.length - 1))));
       pageLoaderRef.current = state.pageLoader; setPageLoader(state.pageLoader);
-      setComic({ ...value, author: value.author || book.author || '未知作者' }); setReadingDirection(preferredDirection.current ?? value.direction); currentPageRef.current = restoredPage; setCurrentPage(restoredPage); void libraryRepository.recordContentInfo(book.id, value.pages.length).catch(console.warn);
+      setComic({ ...value, author: value.author || book.author || '未知作者' }); setReadingDirection(preferredDirection.current ?? value.direction); currentPageRef.current = restoredPage; committedPageRef.current = restoredPage; setCurrentPage(restoredPage); void libraryRepository.recordContentInfo(book.id, value.pages.length).catch(console.warn);
       void persistProgress(restoredPage / Math.max(1, value.pages.length - 1), book.format + ':' + restoredPage);
       const seriesId = 'seriesId' in book ? Number((book as StoredChapter).seriesId) : 0;
       if (seriesId > 0) void statsRepository.startSession({ bookId: book.id, seriesId }).then(id => {
@@ -319,9 +319,20 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
       void controller.close().catch(console.warn);
     };
   }, [book, initialPosition, width, preferencesReady]);
-  useEffect(() => { pageLoaderRef.current?.load(currentPage).catch(() => undefined); pageLoaderRef.current?.prefetchAround(currentPage); }, [currentPage]);
   useEffect(() => {
-    if (!comic || !chapters.length) return;
+    // During a native smooth scroll currentPage is only a visual preview. Do
+    // not start decoding or prefetching from that preview; wait for the
+    // settled page so JS work cannot compete with the scroll animation.
+    if (!comic || currentPage !== committedPageRef.current) return;
+    const loader = pageLoaderRef.current;
+    void loader?.load(currentPage).catch(() => undefined);
+    const task = InteractionManager.runAfterInteractions(() => {
+      if (pageLoaderRef.current === loader && committedPageRef.current === currentPage) loader?.prefetchAround(currentPage);
+    });
+    return () => task.cancel();
+  }, [comic, currentPage]);
+  useEffect(() => {
+    if (!comic || !chapters.length || currentPage !== committedPageRef.current) return;
     // Start warming the neighboring chapter while there is still enough time
     // for SAF/ZIP work to finish before the user reaches the edge.
     const threshold = Math.min(20, Math.max(8, Math.ceil(comic.pages.length * 0.12)));
@@ -329,13 +340,15 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
     if (currentPage <= threshold) candidates.push({ chapter: getAdjacentChapter(chapters, book.id, -1), edge: 'end' });
     if (currentPage >= comic.pages.length - 1 - threshold) candidates.push({ chapter: getAdjacentChapter(chapters, book.id, 1), edge: 'start' });
     let active = true;
-    void Promise.all(candidates.map(async ({ chapter, edge }) => {
-      if (!chapter || !active) return;
-      const local = await libraryRepository.ensureChapterLocal(chapter);
-      if (!active) return;
-      await chapterPrefetcher.prefetch(local, edge, width * 2, (target, sessionId) => contentLoader.open(contentLocatorFromBook(target), { sessionId, targetWidth: width * 2 }));
-    })).catch(() => undefined);
-    return () => { active = false; };
+    const task = InteractionManager.runAfterInteractions(() => {
+      void Promise.all(candidates.map(async ({ chapter, edge }) => {
+        if (!chapter || !active) return;
+        const local = await libraryRepository.ensureChapterLocal(chapter);
+        if (!active) return;
+        await chapterPrefetcher.prefetch(local, edge, width * 2, (target, sessionId) => contentLoader.open(contentLocatorFromBook(target), { sessionId, targetWidth: width * 2 }));
+      })).catch(() => undefined);
+    });
+    return () => { active = false; task.cancel(); };
   }, [book.id, chapters, comic, currentPage, width]);
   useEffect(() => {
     if (!comic) return;
@@ -351,7 +364,7 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
   const leaveReaderRef = useRef<() => Promise<void>>();
   leaveReaderRef.current = leaveReader;
   useEffect(() => { const subscription = BackHandler.addEventListener('hardwareBackPress', () => { void leaveReaderRef.current?.(); return true; }); return () => subscription.remove(); }, []);
-  const pageChanged = (page: number) => { if (!comic) return; const safe = Math.max(0, Math.min(comic.pages.length - 1, page)); currentPageRef.current = safe; setCurrentPage(safe); const readingSession = readingSessionRef.current; if (readingSession && readingSession.lastPage !== safe) { readingSession.lastPage = safe; void statsRepository.recordPageViewed({ sessionId: readingSession.id, bookId: book.id, pageIndex: safe }).catch(() => undefined); } void persistProgress(safe / Math.max(1, comic.pages.length - 1), `${book.format}:${safe}`); };
+  const pageChanged = (page: number) => { if (!comic) return; const safe = Math.max(0, Math.min(comic.pages.length - 1, page)); currentPageRef.current = safe; committedPageRef.current = safe; setCurrentPage(safe); const readingSession = readingSessionRef.current; if (readingSession && readingSession.lastPage !== safe) { readingSession.lastPage = safe; void statsRepository.recordPageViewed({ sessionId: readingSession.id, bookId: book.id, pageIndex: safe }).catch(() => undefined); } void persistProgress(safe / Math.max(1, comic.pages.length - 1), `${book.format}:${safe}`); };
   const displayPages = useMemo<ReaderDisplayPage[]>(() => {
     if (!comic) return [];
     const pages = readingDirection === 'rtl' ? [...comic.pages].reverse() : comic.pages;
@@ -376,14 +389,19 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
     const storedChapterNumber = 'chapterNumber' in book ? book.chapterNumber : undefined;
     const currentIndex = byId >= 0 ? byId : ordered.findIndex(chapter => chapter.originalName === book.originalName || (storedChapterNumber !== undefined && chapter.chapterNumber === storedChapterNumber));
     const target = currentIndex >= 0 ? ordered[currentIndex + delta] : getAdjacentChapter(chapters, book.id, delta);
-    if (!target || !onSelectChapter || pendingChapterId.current === target.id) return;
-    pendingChapterId.current = target.id;
+    // A single edge gesture can be observed by FlatList, the touch handlers,
+    // and the outer PanResponder. Keep one transition lock for the lifetime
+    // of the current chapter so a late callback cannot immediately navigate
+    // back to the other adjacent chapter.
+    if (!target || !onSelectChapter || chapterTransitionRef.current) return;
+    chapterTransitionRef.current = { targetId: target.id, delta };
     try {
-      void Promise.resolve(onSelectChapter(target, delta === 1 ? 'start' : 'end')).catch(console.warn).finally(() => {
-        if (pendingChapterId.current === target.id) pendingChapterId.current = undefined;
+      void Promise.resolve(onSelectChapter(target, delta === 1 ? 'start' : 'end')).catch(reason => {
+        if (chapterTransitionRef.current?.targetId === target.id) chapterTransitionRef.current = undefined;
+        console.warn(reason);
       });
     } catch (reason) {
-      pendingChapterId.current = undefined;
+      chapterTransitionRef.current = undefined;
       console.warn(reason);
     }
   };
@@ -396,10 +414,17 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
     // The load is intentionally not awaited: FlatList should start moving
     // immediately, while PageLoader prevents duplicate render work.
     void pageLoaderRef.current?.load(safe).catch(() => undefined);
-    pageLoaderRef.current?.prefetchAround(safe);
     listRef.current?.scrollToIndex({ index: toGroup(safe), animated });
     if (!animated) pageChanged(safe);
-    else currentPageRef.current = safe;
+    else {
+      currentPageRef.current = safe;
+      // Let the native scroll finish before scheduling the surrounding pages.
+      // The target itself is already queued at priority 0 above.
+      const loader = pageLoaderRef.current;
+      InteractionManager.runAfterInteractions(() => {
+        if (pageLoaderRef.current === loader && committedPageRef.current === safe) loader?.prefetchAround(safe);
+      });
+    }
   };
   const groupIndexForOffset = (offset: number) => Math.max(0, Math.min(displayGroups.length - 1, Math.round(offset / Math.max(1, readingDirection === 'vertical' ? height : width))));
   const handleEdgeRelease = (event: { nativeEvent: { contentOffset: { x: number; y: number }; velocity?: { x?: number; y?: number } } }) => {
@@ -430,7 +455,6 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
     multiTouch.current = false;
     if (wasMultiTouch || !start.time || zoomedRef.current || !comic) return;
     const movement = readingDirection === 'vertical' ? latest.y - start.y : latest.x - start.x;
-    lastTouchMovement.current = movement;
     // FlatList owns ordinary page drags. Only handle a swipe at a chapter
     // boundary because there is no neighboring item for FlatList to reveal.
     if (Math.abs(movement) >= 24) handleBoundarySwipe(movement);
@@ -526,17 +550,20 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
         }}
         onScrollEndDrag={event => {
           handleEdgeRelease(event);
-          const boundaryMovement = lastTouchMovement.current;
-          if (Math.abs(boundaryMovement) >= 4) handleBoundarySwipe(boundaryMovement);
         }}
         onScroll={event => {
           const axis = readingDirection === 'vertical' ? height : width;
           const offset = readingDirection === 'vertical' ? event.nativeEvent.contentOffset.y : event.nativeEvent.contentOffset.x;
           const groupIndex = Math.max(0, Math.min(displayGroups.length - 1, Math.round(offset / Math.max(1, axis))));
-          if (groupIndex === lastPrefetchGroup.current) return;
-          lastPrefetchGroup.current = groupIndex;
           const firstDisplayIndex = groupIndex * (pageMode === 'single' ? 1 : 2);
-          if (displayPages[firstDisplayIndex]) pageLoaderRef.current?.prefetchAround(toActual(firstDisplayIndex));
+          // Update the menu while the native pager is moving, but do not
+          // persist progress or start decoding from this transient preview.
+          // The settled page is committed in onMomentumScrollEnd.
+          const previewPage = displayPages[firstDisplayIndex] ? toActual(firstDisplayIndex) : undefined;
+          if (previewPage !== undefined && previewPage !== currentPageRef.current) {
+            currentPageRef.current = previewPage;
+            setCurrentPage(previewPage);
+          }
         }}
         scrollEventThrottle={16}
         onTouchStart={event => {
@@ -547,7 +574,6 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
             const y = event.nativeEvent.pageY ?? event.nativeEvent.locationY;
             touchStart.current = { x, y, time: Date.now() };
             touchLatest.current = { x, y };
-            lastTouchMovement.current = 0;
           }
         }}
         onTouchMove={event => {
@@ -557,17 +583,11 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
             const x = event.nativeEvent.pageX ?? event.nativeEvent.locationX;
             const y = event.nativeEvent.pageY ?? event.nativeEvent.locationY;
             touchLatest.current = { x, y };
-            lastTouchMovement.current = readingDirection === 'vertical'
-              ? y - touchStart.current.y
-              : x - touchStart.current.x;
           }
         }}
         onTouchEnd={handleTouchRelease}
         onMomentumScrollEnd={event => {
           if (zoomedRef.current) return;
-          const boundaryMovement = lastTouchMovement.current;
-          lastTouchMovement.current = 0;
-          if (Math.abs(boundaryMovement) >= 4) handleBoundarySwipe(boundaryMovement);
           const offset = readingDirection === 'vertical' ? event.nativeEvent.contentOffset.y : event.nativeEvent.contentOffset.x;
           const groupIndex = Math.round(offset / (readingDirection === 'vertical' ? height : width));
           const firstDisplayIndex = groupIndex * (pageMode === 'single' ? 1 : 2);
