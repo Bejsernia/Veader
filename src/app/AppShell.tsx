@@ -10,6 +10,7 @@ import { statsRepository } from '../data/stats-repository';
 import { BottomTabBar } from '../ui/components/bottom-tab-bar';
 import { useTheme } from '../ui/theme';
 import { setNavigationBarAppearance } from '../platform/system-bars';
+import { cleanupStaleSessionCache } from '../cache';
 
 export type LibraryFeatureProps = {
   series: LibrarySeries[];
@@ -87,6 +88,7 @@ export function AppShell({ features }: { features: FeatureComponents }) {
     let active = true;
     const bootstrap = async () => {
       try {
+        await cleanupStaleSessionCache();
         await libraryRepository.initialize();
         await statsRepository.recoverOpenSessions();
         const fastSeries = await libraryRepository.listSeries();

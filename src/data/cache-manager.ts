@@ -16,6 +16,9 @@ export type CacheKind = 'page' | 'source' | 'session';
 export type CacheBreakdown = {
   page: number;
   source: number;
+  session: number;
+  cover: number;
+  other: number;
   total: number;
 };
 

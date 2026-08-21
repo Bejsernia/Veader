@@ -37,7 +37,7 @@ describe('ChapterPrefetcher', () => {
     const prefetcher = new ChapterPrefetcher();
     await prefetcher.prefetch(book(1), 'start', 1200, async () => session(4, prefetchCalls, closed));
 
-    expect(prefetchCalls).toEqual([[0, 1]]);
+    expect(prefetchCalls).toEqual([[0, 1, 2, 3]]);
     await expect(prefetcher.take(book(1))).resolves.toBeDefined();
     expect(prefetcher.size).toBe(0);
     expect(closed).toEqual([]);

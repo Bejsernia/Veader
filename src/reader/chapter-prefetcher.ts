@@ -25,7 +25,10 @@ function chapterKey(book: StoredBook) {
 function edgePages(pageCount: number, edge: PrefetchEdge) {
   if (pageCount <= 1) return [0];
   const last = pageCount - 1;
-  return edge === 'start' ? [0, 1] : [last, last - 1];
+  const pages = edge === 'start'
+    ? [0, 1, 2, 3]
+    : [last, last - 1, last - 2, last - 3];
+  return [...new Set(pages.filter(index => index >= 0 && index < pageCount))];
 }
 
 /**
@@ -118,4 +121,3 @@ export class ChapterPrefetcher {
 }
 
 export const chapterPrefetcher = new ChapterPrefetcher();
-

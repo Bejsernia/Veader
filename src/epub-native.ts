@@ -23,6 +23,8 @@ const pendingTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const activePages = new Map<string, Promise<string>>();
 const sessionPageUris = new Map<string, Map<string, string>>();
 const archiveSessions = new Map<string, Promise<string>>();
+const sessionArchiveKeys = new Map<string, string>();
+const archiveRefs = new Map<string, number>();
 const cancelledSessions = new Set<string>();
 
 export function clearEpubMetadataCache() {
@@ -97,7 +99,13 @@ export async function extractEpubPage(sourceUri: string, entry: string, sessionI
 function pageTargetUri(cacheRoot: string, sourceUri: string, entry: string, sessionId: string, fingerprint: string) {
   const key = stableKey(sourceUri + '\n' + fingerprint + '\n' + entry);
   const extension = entry.split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'img';
-  return cacheRoot + 'epub-pages/' + sessionId + '/' + key + '.' + extension;
+  // Cover extraction remains series-scoped. Reader and prefetch sessions use
+  // a stable book/fingerprint directory so pages survive session handoff and
+  // can be reused after reopening the same unchanged EPUB.
+  const scope = sessionId.startsWith('cover-')
+    ? sessionId
+    : 'book-' + stableKey(sourceUri + '\n' + fingerprint);
+  return cacheRoot + 'epub-pages/' + scope + '/' + key + '.' + extension;
 }
 
 async function flushPageQueue(queueKey: string) {
@@ -108,7 +116,8 @@ async function flushPageQueue(queueKey: string) {
     if (cancelledSessions.has(sessionId)) throw new Error('Reader session closed');
     const cacheRoot = FileSystem.cacheDirectory;
     if (!cacheRoot) throw new Error('cache directory unavailable');
-    const targetDir = cacheRoot + 'epub-pages/' + requests[0]!.sessionId + '/';
+    const firstTarget = requests[0]!.targetUri;
+    const targetDir = firstTarget.slice(0, firstTarget.lastIndexOf('/') + 1);
     const missing: PendingPage[] = [];
     for (const request of requests) {
       const info = await FileSystem.getInfoAsync(request.targetUri);
@@ -118,11 +127,21 @@ async function flushPageQueue(queueKey: string) {
       if (cancelledSessions.has(sessionId)) throw new Error('Reader session closed');
       await FileSystem.makeDirectoryAsync(targetDir, { intermediates: true });
       const scanner = getSafScanner();
-      if (Platform.OS === 'android' && scanner?.prepareEpubSession && scanner?.extractEpubEntriesFromSession && sessionId.startsWith('reader-')) {
-        let archive = archiveSessions.get(sessionId);
+      if (Platform.OS === 'android' && scanner?.prepareEpubSession && scanner?.extractEpubEntriesFromSession && (sessionId.startsWith('reader-') || sessionId.startsWith('prefetch-'))) {
+        const archiveKey = 'archive-' + stableKey(missing[0]!.sourceUri + '\n' + await sourceFingerprint(missing[0]!.sourceUri));
+        let archive = archiveSessions.get(archiveKey);
         if (!archive) {
-          archive = Promise.resolve(scanner.prepareEpubSession(missing[0]!.sourceUri, sessionId));
-          archiveSessions.set(sessionId, archive);
+          const pendingArchive = Promise.resolve(scanner.prepareEpubSession(missing[0]!.sourceUri, archiveKey));
+          archive = pendingArchive.catch(error => {
+            if (archiveSessions.get(archiveKey) === archive) archiveSessions.delete(archiveKey);
+            throw error;
+          });
+          archiveSessions.set(archiveKey, archive);
+          while (archiveSessions.size > 32) archiveSessions.delete(archiveSessions.keys().next().value as string);
+        }
+        if (!sessionArchiveKeys.has(sessionId)) {
+          sessionArchiveKeys.set(sessionId, archiveKey);
+          archiveRefs.set(archiveKey, (archiveRefs.get(archiveKey) ?? 0) + 1);
         }
         await scanner.extractEpubEntriesFromSession(await archive, missing.map(item => item.entry), targetDir, missing.map(item => item.fileName));
       } else if (Platform.OS === 'android' && scanner?.extractEpubEntries) {
@@ -153,11 +172,20 @@ async function flushPageQueue(queueKey: string) {
 export async function clearEpubSession(sessionId: string) {
   cancelledSessions.add(sessionId);
   sessionPageUris.delete(sessionId);
+  const archiveKey = sessionArchiveKeys.get(sessionId);
+  sessionArchiveKeys.delete(sessionId);
   const scanner = getSafScanner();
-  archiveSessions.delete(sessionId);
-  if (Platform.OS === 'android' && scanner?.releaseEpubSession && sessionId.startsWith('reader-')) {
-    await scanner.releaseEpubSession(sessionId).catch(() => undefined);
+  if (archiveKey) {
+    const nextRefs = (archiveRefs.get(archiveKey) ?? 1) - 1;
+    if (nextRefs <= 0) {
+      archiveRefs.delete(archiveKey);
+      archiveSessions.delete(archiveKey);
+      if (Platform.OS === 'android' && scanner?.releaseEpubSession) await scanner.releaseEpubSession(archiveKey).catch(() => undefined);
+    } else archiveRefs.set(archiveKey, nextRefs);
   }
+  // Extracted pages are fingerprint-scoped persistent cache entries. The
+  // staged archive itself is reference-counted and is released once no
+  // current/adjacent reader session needs it.
   const sessionError = new Error('Reader session closed');
   for (const [queueKey, timer] of pendingTimers) {
     if (!queueKey.endsWith('\n' + sessionId)) continue;
@@ -168,9 +196,6 @@ export async function clearEpubSession(sessionId: string) {
     if (request.sessionId !== sessionId) continue;
     pendingPages.delete(targetUri);
     request.reject(sessionError);
-  }
-  if (FileSystem.cacheDirectory) {
-    await FileSystem.deleteAsync(FileSystem.cacheDirectory + 'epub-pages/' + sessionId, { idempotent: true });
   }
 }
 

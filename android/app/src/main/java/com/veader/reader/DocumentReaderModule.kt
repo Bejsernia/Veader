@@ -131,6 +131,16 @@ class DocumentReaderModule(private val context: ReactApplicationContext) : React
   @ReactMethod
   fun renderMobiPage(uri: String, recordIndex: Int, targetWidth: Int, promise: Promise) {
     try {
+      val safeWidth = targetWidth.coerceIn(480, 2048)
+      val cacheDir = File(context.cacheDir, "mobi-pages-native")
+      if (!cacheDir.exists()) cacheDir.mkdirs()
+      val output = File(cacheDir, "${digest(uri + recordIndex + safeWidth)}.jpg")
+      // Check the disk cache before opening SAF, parsing the record table, and
+      // decoding a bitmap. A cache hit should not repeat those expensive steps.
+      if (output.exists() && output.length() > 0L) {
+        promise.resolve(output.toURI().toString())
+        return
+      }
       withChannel(uri) { channel ->
         val index = readMobiIndex(channel)
         if (recordIndex !in index.imageRecords) throw IllegalArgumentException("MOBI 图片页不存在")
@@ -142,12 +152,8 @@ class DocumentReaderModule(private val context: ReactApplicationContext) : React
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw IllegalArgumentException("MOBI 图片无法解码")
-        val safeWidth = targetWidth.coerceIn(480, 2048)
         val options = BitmapFactory.Options().apply { inSampleSize = sampleSize(bounds.outWidth, bounds.outHeight, safeWidth) }
         val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) ?: throw IllegalArgumentException("MOBI 图片无法解码")
-        val cacheDir = File(context.cacheDir, "mobi-pages-native")
-        if (!cacheDir.exists()) cacheDir.mkdirs()
-        val output = File(cacheDir, "${digest(uri + recordIndex + safeWidth)}.jpg")
         if (!output.exists() || output.length() == 0L) {
           FileOutputStream(output).use { stream -> bitmap.compress(Bitmap.CompressFormat.JPEG, 92, stream) }
         }

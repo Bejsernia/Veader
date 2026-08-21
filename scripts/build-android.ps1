@@ -48,12 +48,13 @@ function Remove-StaleNativeCmakeCaches {
     }
   }
 
-  # Reanimated keeps one CMake tree for every ABI. On Windows, reusing the
-  # x86_64 tree after other ABI builds can leave Ninja with an invalid process
-  # command even when the cached paths are still present. This directory is
-  # generated and safe to recreate for a release build.
+  # Reanimated keeps one CMake tree for every ABI. Keep a valid tree between
+  # builds: deleting it on every Windows build forces Ninja to run its
+  # VerifyGlobs command during the busiest part of Gradle and can sporadically
+  # fail with CreateProcess. Set VEADER_RESET_REANIMATED_CMAKE=1 when the
+  # native cache genuinely needs to be regenerated.
   $reanimatedCmake = Join-Path $ProjectRoot 'node_modules\react-native-reanimated\android\.cxx'
-  if (Test-Path -LiteralPath $reanimatedCmake) {
+  if ($env:VEADER_RESET_REANIMATED_CMAKE -eq '1' -and (Test-Path -LiteralPath $reanimatedCmake)) {
     Write-Host "Removing generated Reanimated CMake cache: $reanimatedCmake"
     Remove-Item -LiteralPath $reanimatedCmake -Recurse -Force
   }

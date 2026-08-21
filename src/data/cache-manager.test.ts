@@ -2,7 +2,7 @@ jest.mock('../cache', () => ({
   clearPageCache: jest.fn(async () => undefined),
   clearSessionCache: jest.fn(async () => undefined),
   clearSourceCache: jest.fn(async () => undefined),
-  getCacheBreakdown: jest.fn(async () => ({ page: 10, source: 20, total: 30 })),
+  getCacheBreakdown: jest.fn(async () => ({ page: 10, source: 20, session: 3, cover: 4, other: 5, total: 42 })),
   getPageCacheLimitMb: jest.fn(async () => 512),
   setPageCacheLimitMb: jest.fn(async (value: number) => value),
   getSourceCacheLimitMb: jest.fn(async () => 2048),
@@ -26,7 +26,7 @@ describe('CacheManager', () => {
   });
 
   it('exposes the bounded page cache settings through one boundary', async () => {
-    await expect(cacheManager.getBreakdown()).resolves.toEqual({ page: 10, source: 20, total: 30 });
+    await expect(cacheManager.getBreakdown()).resolves.toEqual({ page: 10, source: 20, session: 3, cover: 4, other: 5, total: 42 });
     await expect(cacheManager.getPageLimitMb()).resolves.toBe(512);
     await expect(cacheManager.setPageLimitMb(256)).resolves.toBe(256);
   });

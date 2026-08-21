@@ -284,7 +284,7 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
     const openContentChapter = (target: StoredBook, chapterSessionId: string) => contentLoader.open(contentLocatorFromBook(target), { sessionId: chapterSessionId, targetWidth: width * 2 });
     const controller = new ReaderController({
       targetWidth: width * 2,
-      prefetchDistance: 4,
+      prefetchDistance: 6,
       concurrency: 2,
       openChapter: openContentChapter,
       takePreloadedChapter: target => chapterPrefetcher.take(target),
@@ -322,7 +322,9 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
   useEffect(() => { pageLoaderRef.current?.load(currentPage).catch(() => undefined); pageLoaderRef.current?.prefetchAround(currentPage); }, [currentPage]);
   useEffect(() => {
     if (!comic || !chapters.length) return;
-    const threshold = Math.min(8, Math.max(2, Math.ceil(comic.pages.length * 0.05)));
+    // Start warming the neighboring chapter while there is still enough time
+    // for SAF/ZIP work to finish before the user reaches the edge.
+    const threshold = Math.min(20, Math.max(8, Math.ceil(comic.pages.length * 0.12)));
     const candidates: Array<{ chapter: StoredChapter | undefined; edge: PrefetchEdge }> = [];
     if (currentPage <= threshold) candidates.push({ chapter: getAdjacentChapter(chapters, book.id, -1), edge: 'end' });
     if (currentPage >= comic.pages.length - 1 - threshold) candidates.push({ chapter: getAdjacentChapter(chapters, book.id, 1), edge: 'start' });
@@ -335,7 +337,13 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
     })).catch(() => undefined);
     return () => { active = false; };
   }, [book.id, chapters, comic, currentPage, width]);
-  useEffect(() => { if (!comic) return; const timer = setTimeout(() => listRef.current?.scrollToIndex({ index: toGroup(currentPage), animated: false }), 0); return () => clearTimeout(timer); }, [comic, currentPage, pageMode, doubleOrder, readingDirection, width, height]);
+  useEffect(() => {
+    if (!comic) return;
+    // This sync is for a new chapter/layout only. Including currentPage here
+    // interrupts FlatList's native smooth-scroll animation after every tap.
+    const timer = setTimeout(() => listRef.current?.scrollToIndex({ index: toGroup(currentPageRef.current), animated: false }), 0);
+    return () => clearTimeout(timer);
+  }, [comic, pageMode, doubleOrder, readingDirection, width, height]);
   const persistProgress = (progress: number, location: string) => { lastProgress.current = { progress, location }; const result = onProgress ? onProgress(progress, location) : undefined; return Promise.resolve(result).catch(console.warn); };
   const leaving = useRef(false);
   const leaveReader = async () => { if (leaving.current) return; leaving.current = true; navigateBack(); await persistProgress(lastProgress.current.progress, lastProgress.current.location); };
@@ -379,7 +387,20 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
       console.warn(reason);
     }
   };
-  const goTo = (actual: number, animated = smooth) => { if (!comic) return; if (actual >= comic.pages.length) return changeChapter(1); if (actual < 0) return changeChapter(-1); const safe = Math.max(0, Math.min(comic.pages.length - 1, actual)); listRef.current?.scrollToIndex({ index: toGroup(safe), animated }); pageChanged(safe); };
+  const goTo = (actual: number, animated = smooth) => {
+    if (!comic) return;
+    if (actual >= comic.pages.length) return changeChapter(1);
+    if (actual < 0) return changeChapter(-1);
+    const safe = Math.max(0, Math.min(comic.pages.length - 1, actual));
+    // Queue the target at high priority before the native animation reveals it.
+    // The load is intentionally not awaited: FlatList should start moving
+    // immediately, while PageLoader prevents duplicate render work.
+    void pageLoaderRef.current?.load(safe).catch(() => undefined);
+    pageLoaderRef.current?.prefetchAround(safe);
+    listRef.current?.scrollToIndex({ index: toGroup(safe), animated });
+    if (!animated) pageChanged(safe);
+    else currentPageRef.current = safe;
+  };
   const groupIndexForOffset = (offset: number) => Math.max(0, Math.min(displayGroups.length - 1, Math.round(offset / Math.max(1, readingDirection === 'vertical' ? height : width))));
   const handleEdgeRelease = (event: { nativeEvent: { contentOffset: { x: number; y: number }; velocity?: { x?: number; y?: number } } }) => {
     if (zoomedRef.current || !comic || !displayGroups.length) return;

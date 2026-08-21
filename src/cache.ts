@@ -7,6 +7,7 @@ const DEFAULT_SOURCE_LIMIT_MB = 2048;
 
 type CacheSettings = { pageCacheLimitMb?: number; sourceCacheLimitMb?: number };
 type CacheFile = { uri: string; size: number; modified: number };
+const PAGE_CACHE_ROOTS = ['epub-pages', 'pdf-pages', 'mobi-pages', 'mobi-pages-native', 'cropped-pages'];
 
 async function readSettings(): Promise<CacheSettings> {
   try {
@@ -83,8 +84,25 @@ export async function trimSourceCacheToLimit(limitMb?: number) {
 }
 
 export async function getCacheBreakdown() {
-  const [page, source] = await Promise.all([getPageCacheSizeBytes(), getSourceCacheSizeBytes()]);
-  return { page, source, total: page + source };
+  if (!FileSystem.cacheDirectory) return { page: 0, source: 0, session: 0, cover: 0, other: 0, total: 0 };
+  const root = FileSystem.cacheDirectory;
+  const files = await listFiles(root);
+  let page = 0;
+  let source = 0;
+  let session = 0;
+  let cover = 0;
+  let other = 0;
+  for (const file of files) {
+    const relative = file.uri.startsWith(root) ? file.uri.slice(root.length) : file.uri;
+    const top = relative.split('/').filter(Boolean)[0] ?? '';
+    if (top === 'remote-books') source += file.size;
+    else if (top === 'epub-archives') session += file.size;
+    else if (PAGE_CACHE_ROOTS.includes(top)) {
+      if (file.uri.includes('/cover-')) cover += file.size;
+      else page += file.size;
+    } else other += file.size;
+  }
+  return { page, source, session, cover, other, total: page + source + session + cover + other };
 }
 
 export async function getPageCacheLimitMb() {
@@ -133,6 +151,20 @@ export async function clearSessionCache() {
   ]);
 }
 
+/** Remove session artifacts left by older builds or a forced process stop. */
+export async function cleanupStaleSessionCache() {
+  if (!FileSystem.cacheDirectory) return;
+  const archiveRoot = `${FileSystem.cacheDirectory}epub-archives/`;
+  const pageRoot = `${FileSystem.cacheDirectory}epub-pages/`;
+  const cleanupChildren = async (root: string, predicate: (name: string) => boolean) => {
+    let children: string[];
+    try { children = await FileSystem.readDirectoryAsync(root); } catch { return; }
+    await Promise.all(children.filter(predicate).map(child => FileSystem.deleteAsync(`${root}${child}`, { idempotent: true }).catch(() => undefined)));
+  };
+  await cleanupChildren(archiveRoot, child => child.startsWith('archive-') || child.startsWith('reader-') || child.startsWith('prefetch-'));
+  await cleanupChildren(pageRoot, child => child.startsWith('reader-') || child.startsWith('prefetch-'));
+}
+
 /** Backwards-compatible alias for the old page-cache action. */
 export async function clearAppCache() {
   return clearPageCache();
@@ -140,7 +172,6 @@ export async function clearAppCache() {
 
 async function listPageCacheFiles() {
   if (!FileSystem.cacheDirectory) return [] as CacheFile[];
-  const roots = ['epub-pages', 'pdf-pages', 'mobi-pages', 'mobi-pages-native', 'cropped-pages'];
-  const files = (await Promise.all(roots.map(root => listFiles(`${FileSystem.cacheDirectory}${root}/`)))).flat();
+  const files = (await Promise.all(PAGE_CACHE_ROOTS.map(root => listFiles(`${FileSystem.cacheDirectory}${root}/`)))).flat();
   return files.filter(file => !file.uri.includes('/cover-'));
 }

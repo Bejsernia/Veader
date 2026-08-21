@@ -57,7 +57,10 @@ export class ReaderController {
     this.session = session;
     this.state = { chapterId: book.id, sessionId, pageCount, currentPage, contentSession: session, pageLoader };
     if (pageCount > 0) {
-      await pageLoader.load(currentPage);
+      // Return the chapter metadata immediately. The page component owns the
+      // visible loading state while the first bitmap is decoded in parallel;
+      // keeping this await here made every cold open block the whole reader.
+      void pageLoader.load(currentPage).catch(() => undefined);
       pageLoader.prefetchAround(currentPage);
     }
     return this.state;
