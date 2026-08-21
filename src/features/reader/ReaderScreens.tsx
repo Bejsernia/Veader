@@ -13,6 +13,7 @@ import { statsRepository } from '../../data/stats-repository';
 import { PageLoader } from '../../reader/page-loader';
 import { ReaderController } from '../../reader/reader-controller';
 import { getAdjacentChapter, orderedChapters } from '../../reader/chapter-navigation';
+import { chapterBoundaryDelta } from '../../reader/chapter-boundary';
 import { chapterPrefetcher, type PrefetchEdge } from '../../reader/chapter-prefetcher';
 import { BottomSheet } from '../../ui/components/bottom-sheet';
 import { PressableScale } from '../../ui/components/pressable-scale';
@@ -196,9 +197,7 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
   const { tokens, isDark: appIsDark } = useTheme();
   const [comic, setComic] = useState<EpubComic>(); const [error, setError] = useState(''); const [menu, setMenu] = useState(false); const [chapterDirectory, setChapterDirectory] = useState(false); const [settings, setSettings] = useState(false);
   const [readingDirection, setReadingDirection] = useState<'ltr' | 'rtl' | 'vertical'>('ltr'); const [tapZones, setTapZones] = useState(true); const [smooth, setSmooth] = useState(true); const [dark, setDark] = useState(true); const [crop, setCrop] = useState(false); const [notch, setNotch] = useState(false); const [volume, setVolume] = useState(true); const [pageMode, setPageMode] = useState<'single' | 'double'>('single'); const [doubleOrder, setDoubleOrder] = useState<'natural' | 'reverse'>('natural');
-  const [currentPage, setCurrentPage] = useState(0); const currentPageRef = useRef(0); const committedPageRef = useRef(0); const { width, height } = useWindowDimensions(); const insets = useSafeAreaInsets(); const [preferencesReady, setPreferencesReady] = useState(false); const [bookOverrides, setBookOverrides] = useState<Partial<import('../../preferences').ReaderPreferences>>({}); const preferenceSnapshot = useRef<import('../../preferences').ReaderPreferences>({}); const preferredDirection = useRef<'ltr' | 'rtl' | 'vertical'>(); const sessionId = useRef('reader-' + Date.now().toString()).current; const readingSessionRef = useRef<{ id: number; lastPage: number }>(); const listRef = useRef<FlatList<ReaderDisplayPage[]>>(null); const pageLoaderRef = useRef<PageLoader>(); const [pageLoader, setPageLoader] = useState<PageLoader>(); const readerControllerRef = useRef<ReaderController>(); const touchStart = useRef({ x: 0, y: 0, time: 0 }); const touchLatest = useRef({ x: 0, y: 0 }); const lastProgress = useRef({ progress: book.progress, location: book.currentLocation || 'epub:0' });
-  const dragStartGroup = useRef(-1);
-  const dragStartOffset = useRef(0);
+  const [currentPage, setCurrentPage] = useState(0); const [sliderPage, setSliderPage] = useState<number>(); const currentPageRef = useRef(0); const committedPageRef = useRef(0); const { width, height } = useWindowDimensions(); const insets = useSafeAreaInsets(); const [preferencesReady, setPreferencesReady] = useState(false); const [bookOverrides, setBookOverrides] = useState<Partial<import('../../preferences').ReaderPreferences>>({}); const preferenceSnapshot = useRef<import('../../preferences').ReaderPreferences>({}); const preferredDirection = useRef<'ltr' | 'rtl' | 'vertical'>(); const sessionId = useRef('reader-' + Date.now().toString()).current; const readingSessionRef = useRef<{ id: number; lastPage: number }>(); const listRef = useRef<FlatList<ReaderDisplayPage[]>>(null); const pageLoaderRef = useRef<PageLoader>(); const [pageLoader, setPageLoader] = useState<PageLoader>(); const readerControllerRef = useRef<ReaderController>(); const touchStart = useRef({ x: 0, y: 0, time: 0 }); const touchLatest = useRef({ x: 0, y: 0 }); const lastProgress = useRef({ progress: book.progress, location: book.currentLocation || 'epub:0' });
   const zoomedRef = useRef(false);
   const [zoomed, setZoomed] = useState(false);
   const multiTouch = useRef(false);
@@ -364,7 +363,7 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
   const leaveReaderRef = useRef<() => Promise<void>>();
   leaveReaderRef.current = leaveReader;
   useEffect(() => { const subscription = BackHandler.addEventListener('hardwareBackPress', () => { void leaveReaderRef.current?.(); return true; }); return () => subscription.remove(); }, []);
-  const pageChanged = (page: number) => { if (!comic) return; const safe = Math.max(0, Math.min(comic.pages.length - 1, page)); currentPageRef.current = safe; committedPageRef.current = safe; setCurrentPage(safe); const readingSession = readingSessionRef.current; if (readingSession && readingSession.lastPage !== safe) { readingSession.lastPage = safe; void statsRepository.recordPageViewed({ sessionId: readingSession.id, bookId: book.id, pageIndex: safe }).catch(() => undefined); } void persistProgress(safe / Math.max(1, comic.pages.length - 1), `${book.format}:${safe}`); };
+  const pageChanged = (page: number) => { if (!comic) return; const safe = Math.max(0, Math.min(comic.pages.length - 1, page)); currentPageRef.current = safe; committedPageRef.current = safe; setSliderPage(undefined); setCurrentPage(safe); const readingSession = readingSessionRef.current; if (readingSession && readingSession.lastPage !== safe) { readingSession.lastPage = safe; void statsRepository.recordPageViewed({ sessionId: readingSession.id, bookId: book.id, pageIndex: safe }).catch(() => undefined); } void persistProgress(safe / Math.max(1, comic.pages.length - 1), `${book.format}:${safe}`); };
   const displayPages = useMemo<ReaderDisplayPage[]>(() => {
     if (!comic) return [];
     const pages = readingDirection === 'rtl' ? [...comic.pages].reverse() : comic.pages;
@@ -410,13 +409,18 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
     if (actual >= comic.pages.length) return changeChapter(1);
     if (actual < 0) return changeChapter(-1);
     const safe = Math.max(0, Math.min(comic.pages.length - 1, actual));
+    const targetGroup = toGroup(safe);
+    const currentGroup = toGroup(currentPageRef.current);
     // Queue the target at high priority before the native animation reveals it.
     // The load is intentionally not awaited: FlatList should start moving
     // immediately, while PageLoader prevents duplicate render work.
     void pageLoaderRef.current?.load(safe).catch(() => undefined);
-    listRef.current?.scrollToIndex({ index: toGroup(safe), animated });
-    if (!animated) pageChanged(safe);
-    else {
+    if (!animated || targetGroup === currentGroup) {
+      pageChanged(safe);
+      return;
+    }
+    listRef.current?.scrollToIndex({ index: targetGroup, animated: true });
+    if (animated) {
       currentPageRef.current = safe;
       // Let the native scroll finish before scheduling the surrounding pages.
       // The target itself is already queued at priority 0 above.
@@ -425,25 +429,6 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
         if (pageLoaderRef.current === loader && committedPageRef.current === safe) loader?.prefetchAround(safe);
       });
     }
-  };
-  const groupIndexForOffset = (offset: number) => Math.max(0, Math.min(displayGroups.length - 1, Math.round(offset / Math.max(1, readingDirection === 'vertical' ? height : width))));
-  const handleEdgeRelease = (event: { nativeEvent: { contentOffset: { x: number; y: number }; velocity?: { x?: number; y?: number } } }) => {
-    if (zoomedRef.current || !comic || !displayGroups.length) return;
-    const offset = readingDirection === 'vertical' ? event.nativeEvent.contentOffset.y : event.nativeEvent.contentOffset.x;
-    const delta = offset - dragStartOffset.current;
-    const velocity = readingDirection === 'vertical' ? event.nativeEvent.velocity?.y ?? 0 : event.nativeEvent.velocity?.x ?? 0;
-    const movingNext = readingDirection === 'rtl' ? delta < -12 || velocity < -0.2 : delta > 12 || velocity > 0.2;
-    const movingPrevious = readingDirection === 'rtl' ? delta > 12 || velocity > 0.2 : delta < -12 || velocity < -0.2;
-    const startGroup = dragStartGroup.current;
-    dragStartGroup.current = -1;
-    // RTL reverses the visual list, so the logical next boundary is the
-    // first FlatList page while the previous boundary is the last one.
-    const atNextBoundary = currentPageRef.current >= comic.pages.length - 1;
-    const atPreviousBoundary = currentPageRef.current <= 0;
-    const nextBoundary = readingDirection === 'rtl' ? 0 : displayGroups.length - 1;
-    const previousBoundary = readingDirection === 'rtl' ? displayGroups.length - 1 : 0;
-    if ((atNextBoundary || startGroup === nextBoundary) && movingNext) changeChapter(1);
-    else if ((atPreviousBoundary || startGroup === previousBoundary) && movingPrevious) changeChapter(-1);
   };
   const handleTap = (coordinate: number) => { const now = Date.now(); if (Number.isFinite(coordinate) && now - lastHandledTap.current.time < 80 && Math.abs(coordinate - lastHandledTap.current.coordinate) < 12) return; if (Number.isFinite(coordinate)) lastHandledTap.current = { coordinate, time: now }; if (zoomedRef.current || !comic) return; if (menu) return setMenu(false); const axisLength = readingDirection === 'vertical' ? height : width; if (!Number.isFinite(coordinate)) return setMenu(!menu); const normalizedCoordinate = coordinate > axisLength * 1.5 ? coordinate / PixelRatio.get() : coordinate; if (!tapZones) return setMenu(!menu); if (normalizedCoordinate >= axisLength / 3 && normalizedCoordinate <= axisLength * 2 / 3) return setMenu(!menu); const next = readingDirection === 'vertical' ? normalizedCoordinate > axisLength * 2 / 3 : readingDirection === 'rtl' ? normalizedCoordinate < axisLength / 3 : normalizedCoordinate > axisLength * 2 / 3; const actualPage = currentPageRef.current; if (next && actualPage >= comic.pages.length - 1) return changeChapter(1); if (!next && actualPage <= 0) return changeChapter(-1); goTo(actualPage + (next ? 1 : -1)); };
   const handleTouchRelease = () => {
@@ -477,14 +462,9 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
   const [pageRatios, setPageRatios] = useState<Record<string, number>>({});
   const reportPageAspectRatio = useCallback((pageKey: string, ratio: number) => { setPageRatios(previous => previous[pageKey] === ratio ? previous : { ...previous, [pageKey]: ratio }); }, []);
   const handleBoundarySwipe = (movement: number) => {
-    if (!comic || zoomedRef.current || !Number.isFinite(movement) || Math.abs(movement) < 4) return;
-    // `movement` is the finger movement, unlike FlatList's content offset.
-    // The reversed RTL data means the logical next page follows a rightward
-    // finger movement; LTR follows the usual leftward movement.
-    const next = readingDirection === 'vertical' ? movement < 0 : readingDirection === 'rtl' ? movement > 0 : movement < 0;
-    const previous = readingDirection === 'vertical' ? movement > 0 : readingDirection === 'rtl' ? movement < 0 : movement > 0;
-    if (next && currentPageRef.current >= comic.pages.length - 1) changeChapter(1);
-    else if (previous && currentPageRef.current <= 0) changeChapter(-1);
+    if (!comic || zoomedRef.current) return;
+    const delta = chapterBoundaryDelta(movement, readingDirection, currentPageRef.current, comic.pages.length);
+    if (delta !== 0) changeChapter(delta);
   };
   const boundaryPanResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => false,
@@ -492,17 +472,13 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
       if (!comic || zoomedRef.current) return false;
       const movement = readingDirection === 'vertical' ? gestureState.dy : gestureState.dx;
       if (Math.abs(movement) < 24) return false;
-      const next = readingDirection === 'vertical' ? movement < 0 : readingDirection === 'rtl' ? movement > 0 : movement < 0;
-      const previous = readingDirection === 'vertical' ? movement > 0 : readingDirection === 'rtl' ? movement < 0 : movement > 0;
-      return (next && currentPageRef.current >= comic.pages.length - 1) || (previous && currentPageRef.current <= 0);
+      return chapterBoundaryDelta(movement, readingDirection, currentPageRef.current, comic.pages.length) !== 0;
     },
     onMoveShouldSetPanResponder: (_event, gestureState) => {
       if (!comic || zoomedRef.current) return false;
       const movement = readingDirection === 'vertical' ? gestureState.dy : gestureState.dx;
       if (Math.abs(movement) < 24) return false;
-      const next = readingDirection === 'vertical' ? movement < 0 : readingDirection === 'rtl' ? movement > 0 : movement < 0;
-      const previous = readingDirection === 'vertical' ? movement > 0 : readingDirection === 'rtl' ? movement < 0 : movement > 0;
-      return (next && currentPageRef.current >= comic.pages.length - 1) || (previous && currentPageRef.current <= 0);
+      return chapterBoundaryDelta(movement, readingDirection, currentPageRef.current, comic.pages.length) !== 0;
     },
     onPanResponderRelease: (_event, gestureState) => {
       handleBoundarySwipe(readingDirection === 'vertical' ? gestureState.dy : gestureState.dx);
@@ -511,7 +487,7 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
   }), [comic, handleBoundarySwipe, readingDirection]);
   const renderPageGroup = ({ item, index: groupIndex }: { item: ReaderDisplayPage[]; index: number }) => {
     const isVertical = readingDirection === 'vertical';
-    const activeGroup = toGroup(currentPage);
+    const activeGroup = toGroup(currentPageRef.current);
     const ratios = item.map(display => pageRatios[display.page.imageUri] ?? 0.68);
     const totalRatio = isVertical ? ratios.reduce((sum, ratio) => sum + 1 / Math.max(0.1, ratio), 0) : ratios.reduce((sum, ratio) => sum + ratio, 0);
     const scale = isVertical ? Math.min(width, height / Math.max(0.1, totalRatio)) : Math.min(height, width / Math.max(0.1, totalRatio));
@@ -543,15 +519,7 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
         showsHorizontalScrollIndicator={false}
         showsVerticalScrollIndicator={false}
         renderItem={renderPageGroup}
-        onScrollBeginDrag={event => {
-          const offset = readingDirection === 'vertical' ? event.nativeEvent.contentOffset.y : event.nativeEvent.contentOffset.x;
-          dragStartOffset.current = offset;
-          dragStartGroup.current = groupIndexForOffset(offset);
-        }}
-        onScrollEndDrag={event => {
-          handleEdgeRelease(event);
-        }}
-        onScroll={event => {
+        onScroll={menu ? event => {
           const axis = readingDirection === 'vertical' ? height : width;
           const offset = readingDirection === 'vertical' ? event.nativeEvent.contentOffset.y : event.nativeEvent.contentOffset.x;
           const groupIndex = Math.max(0, Math.min(displayGroups.length - 1, Math.round(offset / Math.max(1, axis))));
@@ -562,10 +530,12 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
           const previewPage = displayPages[firstDisplayIndex] ? toActual(firstDisplayIndex) : undefined;
           if (previewPage !== undefined && previewPage !== currentPageRef.current) {
             currentPageRef.current = previewPage;
-            setCurrentPage(previewPage);
+            // Only render a preview while the menu is visible. A closed-menu
+            // swipe stays on the native pager path and avoids JS interruptions.
+            if (menu) setCurrentPage(previewPage);
           }
-        }}
-        scrollEventThrottle={16}
+        } : undefined}
+        scrollEventThrottle={32}
         onTouchStart={event => {
           const touches = (event.nativeEvent as unknown as { touches?: unknown[] }).touches;
           if (touches && touches.length > 1) multiTouch.current = true;
@@ -601,7 +571,7 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
         </View>
         <View style={[styles.epubBottom, styles.readerMenuSurface, styles.readerOverlay, { backgroundColor: menuBackground }]}>
           <Text numberOfLines={1} style={[styles.chapterLabel, { color: menuMuted }]}>{comic.title} · 整卷</Text>
-          <Slider style={styles.readerSlider} minimumValue={0} maximumValue={comic.pages.length - 1} step={1} value={currentPage} minimumTrackTintColor="#8B70F7" maximumTrackTintColor={menuTrack} thumbTintColor={menuPrimary} onSlidingComplete={value => goTo(value)} />
+          <Slider style={styles.readerSlider} minimumValue={0} maximumValue={comic.pages.length - 1} step={1} value={sliderPage ?? currentPage} minimumTrackTintColor="#8B70F7" maximumTrackTintColor={menuTrack} thumbTintColor={menuPrimary} onValueChange={value => setSliderPage(Math.round(value))} onSlidingComplete={value => { const target = Math.round(value); setSliderPage(target); goTo(target); }} />
           <View style={styles.quickActions}><PressableScale haptic="selection" style={styles.quickAction} accessibilityRole="button" accessibilityLabel="章节目录" onPress={() => chapters.length ? setChapterDirectory(true) : navigateBack()}><Ionicons name="list-outline" size={21} color={menuPrimary} /></PressableScale><Text numberOfLines={1} style={[styles.epubCounter, { flex: 1, minWidth: 120, color: menuPrimary, fontSize: 14, lineHeight: 20, fontWeight: '800', textAlign: 'center', paddingHorizontal: 8 }]}>{`第 ${currentPage + 1} / ${comic.pages.length} 页`}</Text><PressableScale haptic="selection" style={styles.quickAction} accessibilityRole="button" accessibilityLabel="详细设置" onPress={() => setSettings(true)}><Ionicons name="options-outline" size={21} color={menuPrimary} /></PressableScale></View>
         </View>
       </>}
