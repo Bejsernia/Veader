@@ -65,7 +65,7 @@ function OptionSet({ values, value, onChange, dark }: { values: string[]; value:
   return <View style={[styles.segment, isDark && uiStyles.segmentDark]}>{values.map(v => <PressableScale haptic="selection" key={v} onPress={() => onChange(v)} style={[styles.segmentItem, value === v && styles.segmentActive, isDark && value === v && uiStyles.segmentActiveDark]}><Text style={[styles.segmentText, value === v && styles.segmentTextActive, isDark && value !== v && uiStyles.segmentTextDark, isDark && value === v && uiStyles.segmentTextActiveDark]}>{v}</Text></PressableScale>)}</View>;
 }
 
-function ZoomablePage({ width, height, active, tapEnabled = active, children, onZoomChange, onTap, tapAxis = 'horizontal' }: { width: number; height: number; active: boolean; tapEnabled?: boolean; children: React.ReactNode; onZoomChange?: (zoomed: boolean) => void; onTap?: (coordinate: number) => void; tapAxis?: 'horizontal' | 'vertical' }) {
+function ZoomablePage({ width, height, active, tapEnabled = active, children, onZoomChange, onTap, tapAxis = 'horizontal', isBoundaryGesture, onBoundarySwipe }: { width: number; height: number; active: boolean; tapEnabled?: boolean; children: React.ReactNode; onZoomChange?: (zoomed: boolean) => void; onTap?: (coordinate: number) => void; tapAxis?: 'horizontal' | 'vertical'; isBoundaryGesture?: (dx: number, dy: number) => boolean; onBoundarySwipe?: (dx: number, dy: number) => void }) {
   const { reducedMotion, tokens } = useTheme();
   const scale = useSharedValue(1);
   const translateX = useSharedValue(0);
@@ -97,6 +97,7 @@ function ZoomablePage({ width, height, active, tapEnabled = active, children, on
   const pinchStartDistance = useRef(0);
   const pinchActive = useRef(false);
   const panActive = useRef(false);
+  const boundaryActive = useRef(false);
   const readTouches = (event: { nativeEvent: { touches?: Array<{ locationX?: number; locationY?: number; pageX?: number; pageY?: number }> } }) => event.nativeEvent.touches ?? [];
   const distanceBetween = (first: { locationX?: number; locationY?: number; pageX?: number; pageY?: number }, second: { locationX?: number; locationY?: number; pageX?: number; pageY?: number }) => {
     const firstX = first.locationX ?? first.pageX ?? 0;
@@ -107,8 +108,10 @@ function ZoomablePage({ width, height, active, tapEnabled = active, children, on
   };
   const panResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => false,
-    onMoveShouldSetPanResponder: (_event, gestureState) => active && (gestureState.numberActiveTouches >= 2 || (zoomedRef.current && gestureState.numberActiveTouches <= 1 && (Math.abs(gestureState.dx) > 2 || Math.abs(gestureState.dy) > 2))),
+    onMoveShouldSetPanResponder: (_event, gestureState) => active && ((!zoomedRef.current && isBoundaryGesture?.(gestureState.dx, gestureState.dy)) || gestureState.numberActiveTouches >= 2 || (zoomedRef.current && gestureState.numberActiveTouches <= 1 && (Math.abs(gestureState.dx) > 2 || Math.abs(gestureState.dy) > 2))),
     onPanResponderGrant: (event, gestureState) => {
+      boundaryActive.current = !zoomedRef.current && Boolean(isBoundaryGesture?.(gestureState.dx, gestureState.dy));
+      if (boundaryActive.current) return;
       cancelAnimation(scale);
       cancelAnimation(translateX);
       cancelAnimation(translateY);
@@ -128,6 +131,7 @@ function ZoomablePage({ width, height, active, tapEnabled = active, children, on
       }
     },
     onPanResponderMove: (event, gestureState) => {
+      if (boundaryActive.current) return;
       const touches = readTouches(event);
       if (touches.length >= 2) {
         if (!pinchActive.current) {
@@ -161,6 +165,11 @@ function ZoomablePage({ width, height, active, tapEnabled = active, children, on
       }
     },
     onPanResponderRelease: (_event, gestureState) => {
+      if (boundaryActive.current) {
+        boundaryActive.current = false;
+        onBoundarySwipe?.(gestureState.dx, gestureState.dy);
+        return;
+      }
       const wasPinching = pinchActive.current;
       pinchActive.current = false;
       panActive.current = false;
@@ -181,6 +190,7 @@ function ZoomablePage({ width, height, active, tapEnabled = active, children, on
       else translateY.value = withSpring(clamp(translateY.value, maxY));
     },
     onPanResponderTerminate: () => {
+      boundaryActive.current = false;
       pinchActive.current = false;
       panActive.current = false;
       if (!zoomedRef.current) return;
@@ -188,7 +198,7 @@ function ZoomablePage({ width, height, active, tapEnabled = active, children, on
       translateY.value = withSpring(clamp(translateY.value, boundY(scale.value)));
     },
     onPanResponderTerminationRequest: () => false,
-  }), [active, width, height, scale, startScale, startTranslateX, startTranslateY, translateX, translateY]);
+  }), [active, height, isBoundaryGesture, onBoundarySwipe, scale, startScale, startFocalX, startFocalY, startTranslateX, startTranslateY, translateX, translateY, width]);
   const animatedStyle = useAnimatedStyle(() => ({ transform: [{ translateX: translateX.value }, { translateY: translateY.value }, { scale: scale.value }] }));
   return <Animated.View {...panResponder.panHandlers} style={[{ width, height, alignItems: 'center', justifyContent: 'center' }, animatedStyle]}>{children}</Animated.View>;
 }
@@ -197,10 +207,12 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
   const { tokens, isDark: appIsDark } = useTheme();
   const [comic, setComic] = useState<EpubComic>(); const [error, setError] = useState(''); const [menu, setMenu] = useState(false); const [chapterDirectory, setChapterDirectory] = useState(false); const [settings, setSettings] = useState(false);
   const [readingDirection, setReadingDirection] = useState<'ltr' | 'rtl' | 'vertical'>('ltr'); const [tapZones, setTapZones] = useState(true); const [smooth, setSmooth] = useState(true); const [dark, setDark] = useState(true); const [crop, setCrop] = useState(false); const [notch, setNotch] = useState(false); const [volume, setVolume] = useState(true); const [pageMode, setPageMode] = useState<'single' | 'double'>('single'); const [doubleOrder, setDoubleOrder] = useState<'natural' | 'reverse'>('natural');
-  const [currentPage, setCurrentPage] = useState(0); const [sliderPage, setSliderPage] = useState<number>(); const currentPageRef = useRef(0); const committedPageRef = useRef(0); const { width, height } = useWindowDimensions(); const insets = useSafeAreaInsets(); const [preferencesReady, setPreferencesReady] = useState(false); const [bookOverrides, setBookOverrides] = useState<Partial<import('../../preferences').ReaderPreferences>>({}); const preferenceSnapshot = useRef<import('../../preferences').ReaderPreferences>({}); const preferredDirection = useRef<'ltr' | 'rtl' | 'vertical'>(); const sessionId = useRef('reader-' + Date.now().toString()).current; const readingSessionRef = useRef<{ id: number; lastPage: number }>(); const listRef = useRef<FlatList<ReaderDisplayPage[]>>(null); const pageLoaderRef = useRef<PageLoader>(); const [pageLoader, setPageLoader] = useState<PageLoader>(); const readerControllerRef = useRef<ReaderController>(); const touchStart = useRef({ x: 0, y: 0, time: 0 }); const touchLatest = useRef({ x: 0, y: 0 }); const lastProgress = useRef({ progress: book.progress, location: book.currentLocation || 'epub:0' });
+  const [currentPage, setCurrentPage] = useState(0); const [sliderPage, setSliderPage] = useState<number>(); const currentPageRef = useRef(0); const committedPageRef = useRef(0); const pendingPageRef = useRef<number>(); const seekingPageRef = useRef<number>(); const sliderDraggingRef = useRef(false); const { width, height } = useWindowDimensions(); const insets = useSafeAreaInsets(); const [preferencesReady, setPreferencesReady] = useState(false); const [bookOverrides, setBookOverrides] = useState<Partial<import('../../preferences').ReaderPreferences>>({}); const preferenceSnapshot = useRef<import('../../preferences').ReaderPreferences>({}); const preferredDirection = useRef<'ltr' | 'rtl' | 'vertical'>(); const sessionId = useRef('reader-' + Date.now().toString()).current; const readingSessionRef = useRef<{ id: number; lastPage: number }>(); const listRef = useRef<FlatList<ReaderDisplayPage[]>>(null); const pageLoaderRef = useRef<PageLoader>(); const [pageLoader, setPageLoader] = useState<PageLoader>(); const readerControllerRef = useRef<ReaderController>(); const touchStart = useRef({ x: 0, y: 0, time: 0 }); const touchLatest = useRef({ x: 0, y: 0 }); const gestureStartPageRef = useRef(0); const lastSwipeMovementRef = useRef<number>(); const lastProgress = useRef({ progress: book.progress, location: book.currentLocation || 'epub:0' });
   const zoomedRef = useRef(false);
   const [zoomed, setZoomed] = useState(false);
   const multiTouch = useRef(false);
+  const edgePanActiveRef = useRef(false);
+  const edgeReleaseAtRef = useRef(0);
   const lastHandledTap = useRef({ coordinate: Number.NaN, time: 0 });
   const chapterTransitionRef = useRef<{ targetId: number; delta: -1 | 1 }>();
   useEffect(() => { StatusBar.setHidden(true, 'none'); return () => { StatusBar.setHidden(false, 'none'); }; }, []);
@@ -363,7 +375,7 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
   const leaveReaderRef = useRef<() => Promise<void>>();
   leaveReaderRef.current = leaveReader;
   useEffect(() => { const subscription = BackHandler.addEventListener('hardwareBackPress', () => { void leaveReaderRef.current?.(); return true; }); return () => subscription.remove(); }, []);
-  const pageChanged = (page: number) => { if (!comic) return; const safe = Math.max(0, Math.min(comic.pages.length - 1, page)); currentPageRef.current = safe; committedPageRef.current = safe; setSliderPage(undefined); setCurrentPage(safe); const readingSession = readingSessionRef.current; if (readingSession && readingSession.lastPage !== safe) { readingSession.lastPage = safe; void statsRepository.recordPageViewed({ sessionId: readingSession.id, bookId: book.id, pageIndex: safe }).catch(() => undefined); } void persistProgress(safe / Math.max(1, comic.pages.length - 1), `${book.format}:${safe}`); };
+  const pageChanged = (page: number) => { if (!comic) return; const safe = Math.max(0, Math.min(comic.pages.length - 1, page)); pendingPageRef.current = undefined; seekingPageRef.current = undefined; sliderDraggingRef.current = false; currentPageRef.current = safe; committedPageRef.current = safe; setSliderPage(undefined); setCurrentPage(safe); const readingSession = readingSessionRef.current; if (readingSession && readingSession.lastPage !== safe) { readingSession.lastPage = safe; void statsRepository.recordPageViewed({ sessionId: readingSession.id, bookId: book.id, pageIndex: safe }).catch(() => undefined); } void persistProgress(safe / Math.max(1, comic.pages.length - 1), `${book.format}:${safe}`); };
   const displayPages = useMemo<ReaderDisplayPage[]>(() => {
     if (!comic) return [];
     const pages = readingDirection === 'rtl' ? [...comic.pages].reverse() : comic.pages;
@@ -393,6 +405,10 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
     // of the current chapter so a late callback cannot immediately navigate
     // back to the other adjacent chapter.
     if (!target || !onSelectChapter || chapterTransitionRef.current) return;
+    pendingPageRef.current = undefined;
+    seekingPageRef.current = undefined;
+    sliderDraggingRef.current = false;
+    setSliderPage(undefined);
     chapterTransitionRef.current = { targetId: target.id, delta };
     try {
       void Promise.resolve(onSelectChapter(target, delta === 1 ? 'start' : 'end')).catch(reason => {
@@ -419,9 +435,9 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
       pageChanged(safe);
       return;
     }
+    pendingPageRef.current = safe;
     listRef.current?.scrollToIndex({ index: targetGroup, animated: true });
     if (animated) {
-      currentPageRef.current = safe;
       // Let the native scroll finish before scheduling the surrounding pages.
       // The target itself is already queued at priority 0 above.
       const loader = pageLoaderRef.current;
@@ -435,6 +451,7 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
     const start = touchStart.current;
     const latest = touchLatest.current;
     const wasMultiTouch = multiTouch.current;
+    const gesturePage = gestureStartPageRef.current;
     touchStart.current = { x: 0, y: 0, time: 0 };
     touchLatest.current = { x: 0, y: 0 };
     multiTouch.current = false;
@@ -442,7 +459,8 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
     const movement = readingDirection === 'vertical' ? latest.y - start.y : latest.x - start.x;
     // FlatList owns ordinary page drags. Only handle a swipe at a chapter
     // boundary because there is no neighboring item for FlatList to reveal.
-    if (Math.abs(movement) >= 24) handleBoundarySwipe(movement);
+    lastSwipeMovementRef.current = movement;
+    if (Math.abs(movement) >= 24) handleEdgeMovement(movement, gesturePage);
     else handleTap(readingDirection === 'vertical' ? start.y : start.x);
   };
   const changeDirection = (value: string) => { const direction = value === '从右到左' ? 'rtl' : value === '从上到下' ? 'vertical' : 'ltr'; comicRtlTheme = direction === 'rtl'; setReadingDirection(direction); setTimeout(() => listRef.current?.scrollToIndex({ index: toGroup(currentPage), animated: false }), 0); };
@@ -461,10 +479,22 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
   const menuTrack = menuDark ? '#55515B' : '#D0CBD8';
   const [pageRatios, setPageRatios] = useState<Record<string, number>>({});
   const reportPageAspectRatio = useCallback((pageKey: string, ratio: number) => { setPageRatios(previous => previous[pageKey] === ratio ? previous : { ...previous, [pageKey]: ratio }); }, []);
-  const handleBoundarySwipe = (movement: number) => {
+  const handleBoundarySwipe = (movement: number, page = currentPageRef.current) => {
     if (!comic || zoomedRef.current) return;
-    const delta = chapterBoundaryDelta(movement, readingDirection, currentPageRef.current, comic.pages.length);
+    const delta = chapterBoundaryDelta(movement, readingDirection, page, comic.pages.length);
     if (delta !== 0) changeChapter(delta);
+  };
+  const handleEdgeMovement = (movement: number, page: number) => {
+    if (!comic || zoomedRef.current) return;
+    const boundary = chapterBoundaryDelta(movement, readingDirection, page, comic.pages.length);
+    if (boundary !== 0) {
+      handleBoundarySwipe(movement, page);
+      return;
+    }
+    if (page <= 0 || page >= comic.pages.length - 1) {
+      const next = readingDirection === 'vertical' ? movement < 0 : readingDirection === 'rtl' ? movement > 0 : movement < 0;
+      goTo(page + (next ? 1 : -1), false);
+    }
   };
   const boundaryPanResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => false,
@@ -472,19 +502,49 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
       if (!comic || zoomedRef.current) return false;
       const movement = readingDirection === 'vertical' ? gestureState.dy : gestureState.dx;
       if (Math.abs(movement) < 24) return false;
-      return chapterBoundaryDelta(movement, readingDirection, currentPageRef.current, comic.pages.length) !== 0;
+      const gesturePage = touchStart.current.time ? gestureStartPageRef.current : currentPageRef.current;
+      return chapterBoundaryDelta(movement, readingDirection, gesturePage, comic.pages.length) !== 0 || gesturePage <= 0 || gesturePage >= comic.pages.length - 1;
     },
     onMoveShouldSetPanResponder: (_event, gestureState) => {
       if (!comic || zoomedRef.current) return false;
       const movement = readingDirection === 'vertical' ? gestureState.dy : gestureState.dx;
       if (Math.abs(movement) < 24) return false;
-      return chapterBoundaryDelta(movement, readingDirection, currentPageRef.current, comic.pages.length) !== 0;
+      const gesturePage = touchStart.current.time ? gestureStartPageRef.current : currentPageRef.current;
+      return chapterBoundaryDelta(movement, readingDirection, gesturePage, comic.pages.length) !== 0 || gesturePage <= 0 || gesturePage >= comic.pages.length - 1;
+    },
+    onPanResponderGrant: () => {
+      gestureStartPageRef.current = currentPageRef.current;
     },
     onPanResponderRelease: (_event, gestureState) => {
-      handleBoundarySwipe(readingDirection === 'vertical' ? gestureState.dy : gestureState.dx);
+      const movement = readingDirection === 'vertical' ? gestureState.dy : gestureState.dx;
+      lastSwipeMovementRef.current = movement;
+      handleEdgeMovement(movement, gestureStartPageRef.current);
     },
     onPanResponderTerminate: () => undefined,
-  }), [comic, handleBoundarySwipe, readingDirection]);
+  }), [comic, goTo, handleBoundarySwipe, handleEdgeMovement, readingDirection]);
+  const edgePanResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => false,
+    onMoveShouldSetPanResponder: (_event, gestureState) => {
+      if (!comic || zoomedRef.current || gestureState.numberActiveTouches > 1) return false;
+      const page = gestureStartPageRef.current;
+      const movement = readingDirection === 'vertical' ? gestureState.dy : gestureState.dx;
+      return (page <= 0 || page >= comic.pages.length - 1) && Math.abs(movement) >= 24;
+    },
+    onPanResponderGrant: () => {
+      edgePanActiveRef.current = true;
+      gestureStartPageRef.current = currentPageRef.current;
+    },
+    onPanResponderRelease: (_event, gestureState) => {
+      edgePanActiveRef.current = false;
+      edgeReleaseAtRef.current = Date.now();
+      handleEdgeMovement(readingDirection === 'vertical' ? gestureState.dy : gestureState.dx, gestureStartPageRef.current);
+    },
+    onPanResponderTerminate: () => {
+      edgePanActiveRef.current = false;
+      edgeReleaseAtRef.current = Date.now();
+    },
+    onPanResponderTerminationRequest: () => false,
+  }), [comic, edgePanActiveRef, goTo, handleEdgeMovement, readingDirection]);
   const renderPageGroup = ({ item, index: groupIndex }: { item: ReaderDisplayPage[]; index: number }) => {
     const isVertical = readingDirection === 'vertical';
     const activeGroup = toGroup(currentPageRef.current);
@@ -494,8 +554,9 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
     const sizes = ratios.map(ratio => isVertical ? { width: scale, height: scale / Math.max(0.1, ratio) } : { width: scale * ratio, height: scale });
     const contentWidth = isVertical ? scale : sizes.reduce((sum, size) => sum + size.width, 0);
     const contentHeight = isVertical ? sizes.reduce((sum, size) => sum + size.height, 0) : scale;
-    return <View style={{ width, height, alignItems: 'center', justifyContent: 'center', padding: 0, margin: 0 }}><View style={{ width: contentWidth, height: contentHeight, flexDirection: isVertical ? 'column' : 'row', alignItems: 'center', justifyContent: 'center', padding: 0, margin: 0 }}>{item.map((display, pageIndex) => { const size = sizes[pageIndex]!; return <View key={display.page.imageUri} style={{ width: size.width, height: size.height, margin: 0, padding: 0, overflow: 'hidden' }}><ZoomablePage width={size.width} height={size.height} active={groupIndex === activeGroup} tapEnabled={false} tapAxis={isVertical ? 'vertical' : 'horizontal'} onZoomChange={value => { if (groupIndex === activeGroup) { zoomedRef.current = value; setZoomed(value); } }} onTap={handleTap}><EpubPageView book={book} page={display.page} width={size.width} height={size.height} crop={crop} dark={dark} sessionId={sessionId} pageLoader={pageLoader} onAspectRatio={reportPageAspectRatio} /></ZoomablePage></View>; })}</View></View>;
+    return <View style={{ width, height, alignItems: 'center', justifyContent: 'center', padding: 0, margin: 0 }}><View style={{ width: contentWidth, height: contentHeight, flexDirection: isVertical ? 'column' : 'row', alignItems: 'center', justifyContent: 'center', padding: 0, margin: 0 }}>{item.map((display, pageIndex) => { const size = sizes[pageIndex]!; return <View key={display.page.imageUri} style={{ width: size.width, height: size.height, margin: 0, padding: 0, overflow: 'hidden' }}><ZoomablePage width={size.width} height={size.height} active={groupIndex === activeGroup} tapEnabled={false} tapAxis={isVertical ? 'vertical' : 'horizontal'} isBoundaryGesture={(dx, dy) => { if (!comic || groupIndex !== activeGroup || zoomedRef.current) return false; const movement = isVertical ? dy : dx; const page = touchStart.current.time ? gestureStartPageRef.current : currentPageRef.current; return chapterBoundaryDelta(movement, readingDirection, page, comic.pages.length) !== 0; }} onBoundarySwipe={(dx, dy) => handleBoundarySwipe(isVertical ? dy : dx, gestureStartPageRef.current)} onZoomChange={value => { if (groupIndex === activeGroup) { zoomedRef.current = value; setZoomed(value); } }} onTap={handleTap}><EpubPageView book={book} page={display.page} width={size.width} height={size.height} crop={crop} dark={dark} sessionId={sessionId} pageLoader={pageLoader} onAspectRatio={reportPageAspectRatio} /></ZoomablePage></View>; })}</View></View>;
   };
+  const pagerAtChapterEdge = Boolean(comic && (currentPageRef.current <= 0 || currentPageRef.current >= comic.pages.length - 1));
   if (error) return <SafeAreaView style={styles.documentReader}><View style={styles.documentTop}><IconButton name="chevron-back" onPress={back} dark /><Text style={styles.readerBook}>{book.title}</Text></View><View style={styles.readerMessage}><Ionicons name="warning-outline" size={38} color="#E1915F" /><Text style={styles.errorText}>{error}</Text></View></SafeAreaView>;
   if (!comic) return <SafeAreaView style={styles.documentReader}><View style={styles.readerMessage}><ActivityIndicator color="#8B70F7" size="large" /><Text style={styles.readerChapter}>正在建立 {book.format.toUpperCase()} 页表…</Text></View></SafeAreaView>;
     return <View style={[styles.comicReader, { backgroundColor: dark ? '#09090B' : '#FFFFFF' }]}>
@@ -505,7 +566,7 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
         ref={listRef}
         data={displayGroups}
         extraData={`${dark}:${menuDark}:${crop}:${pageMode}:${readingDirection}:${Object.keys(pageRatios).length}:${zoomed}`}
-        scrollEnabled={!zoomed}
+        scrollEnabled={!zoomed && !pagerAtChapterEdge}
         horizontal={readingDirection !== 'vertical'}
         pagingEnabled
         initialScrollIndex={toGroup(currentPage)}
@@ -528,6 +589,7 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
           // persist progress or start decoding from this transient preview.
           // The settled page is committed in onMomentumScrollEnd.
           const previewPage = displayPages[firstDisplayIndex] ? toActual(firstDisplayIndex) : undefined;
+          if (seekingPageRef.current !== undefined) return;
           if (previewPage !== undefined && previewPage !== currentPageRef.current) {
             currentPageRef.current = previewPage;
             // Only render a preview while the menu is visible. A closed-menu
@@ -544,6 +606,7 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
             const y = event.nativeEvent.pageY ?? event.nativeEvent.locationY;
             touchStart.current = { x, y, time: Date.now() };
             touchLatest.current = { x, y };
+            gestureStartPageRef.current = currentPageRef.current;
           }
         }}
         onTouchMove={event => {
@@ -556,14 +619,53 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
           }
         }}
         onTouchEnd={handleTouchRelease}
+        onScrollBeginDrag={() => {
+          gestureStartPageRef.current = currentPageRef.current;
+          lastSwipeMovementRef.current = undefined;
+        }}
+        onScrollEndDrag={event => {
+          const start = touchStart.current;
+          const latest = touchLatest.current;
+          const touchMovement = start.time ? (readingDirection === 'vertical' ? latest.y - start.y : latest.x - start.x) : 0;
+          const velocity = readingDirection === 'vertical' ? event.nativeEvent.velocity?.y ?? 0 : event.nativeEvent.velocity?.x ?? 0;
+          // RN reports the content-offset velocity, which has the opposite
+          // sign to the finger movement. It is the only signal available
+          // when a pager is already at its edge and emits no offset delta.
+          const velocityMovement = -velocity * 100;
+          const movement = lastSwipeMovementRef.current ?? (Math.abs(touchMovement) >= 24 ? touchMovement : velocityMovement);
+          if (Math.abs(movement) >= 24) handleBoundarySwipe(movement, gestureStartPageRef.current);
+          lastSwipeMovementRef.current = undefined;
+        }}
         onMomentumScrollEnd={event => {
-          if (zoomedRef.current) return;
+          if (zoomedRef.current || chapterTransitionRef.current) return;
           const offset = readingDirection === 'vertical' ? event.nativeEvent.contentOffset.y : event.nativeEvent.contentOffset.x;
           const groupIndex = Math.round(offset / (readingDirection === 'vertical' ? height : width));
           const firstDisplayIndex = groupIndex * (pageMode === 'single' ? 1 : 2);
-          if (displayPages[firstDisplayIndex]) pageChanged(toActual(firstDisplayIndex));
+          if (pendingPageRef.current !== undefined) {
+            pageChanged(pendingPageRef.current);
+          } else if (displayPages[firstDisplayIndex]) pageChanged(toActual(firstDisplayIndex));
         }}
       />
+      {pagerAtChapterEdge && !zoomed && !menu && <View
+        style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, zIndex: 10, elevation: 10 }}
+        onTouchStart={event => {
+          const x = event.nativeEvent.pageX ?? event.nativeEvent.locationX;
+          const y = event.nativeEvent.pageY ?? event.nativeEvent.locationY;
+          touchStart.current = { x, y, time: Date.now() };
+          touchLatest.current = { x, y };
+          gestureStartPageRef.current = currentPageRef.current;
+        }}
+        onTouchMove={event => {
+          const x = event.nativeEvent.pageX ?? event.nativeEvent.locationX;
+          const y = event.nativeEvent.pageY ?? event.nativeEvent.locationY;
+          touchLatest.current = { x, y };
+        }}
+        onTouchEnd={() => {
+          if (Date.now() - edgeReleaseAtRef.current < 120) return;
+          if (!edgePanActiveRef.current) handleTouchRelease();
+        }}
+        {...edgePanResponder.panHandlers}
+      />}
       {menu && <>
         <View style={[styles.readerTop, styles.readerMenuSurface, styles.readerOverlay, { paddingTop: notch ? Math.min(insets.top, 12) : 0, height: notch ? 76 : 66, backgroundColor: menuBackground }]}>
           <IconButton name="chevron-back" onPress={back} color={menuPrimary} />
@@ -571,8 +673,8 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
         </View>
         <View style={[styles.epubBottom, styles.readerMenuSurface, styles.readerOverlay, { backgroundColor: menuBackground }]}>
           <Text numberOfLines={1} style={[styles.chapterLabel, { color: menuMuted }]}>{comic.title} · 整卷</Text>
-          <Slider style={styles.readerSlider} minimumValue={0} maximumValue={comic.pages.length - 1} step={1} value={sliderPage ?? currentPage} minimumTrackTintColor="#8B70F7" maximumTrackTintColor={menuTrack} thumbTintColor={menuPrimary} onValueChange={value => setSliderPage(Math.round(value))} onSlidingComplete={value => { const target = Math.round(value); setSliderPage(target); goTo(target); }} />
-          <View style={styles.quickActions}><PressableScale haptic="selection" style={styles.quickAction} accessibilityRole="button" accessibilityLabel="章节目录" onPress={() => chapters.length ? setChapterDirectory(true) : navigateBack()}><Ionicons name="list-outline" size={21} color={menuPrimary} /></PressableScale><Text numberOfLines={1} style={[styles.epubCounter, { flex: 1, minWidth: 120, color: menuPrimary, fontSize: 14, lineHeight: 20, fontWeight: '800', textAlign: 'center', paddingHorizontal: 8 }]}>{`第 ${currentPage + 1} / ${comic.pages.length} 页`}</Text><PressableScale haptic="selection" style={styles.quickAction} accessibilityRole="button" accessibilityLabel="详细设置" onPress={() => setSettings(true)}><Ionicons name="options-outline" size={21} color={menuPrimary} /></PressableScale></View>
+          <Slider style={styles.readerSlider} minimumValue={0} maximumValue={comic.pages.length - 1} step={1} value={sliderPage ?? currentPage} minimumTrackTintColor="#8B70F7" maximumTrackTintColor={menuTrack} thumbTintColor={menuPrimary} onValueChange={value => { sliderDraggingRef.current = true; setSliderPage(Math.round(value)); }} onSlidingComplete={value => { const target = Math.round(value); seekingPageRef.current = target; setSliderPage(target); goTo(target); }} />
+          <View style={styles.quickActions}><PressableScale haptic="selection" style={styles.quickAction} accessibilityRole="button" accessibilityLabel="章节目录" onPress={() => chapters.length ? setChapterDirectory(true) : navigateBack()}><Ionicons name="list-outline" size={21} color={menuPrimary} /></PressableScale><Text numberOfLines={1} style={[styles.epubCounter, { flex: 1, minWidth: 120, color: menuPrimary, fontSize: 14, lineHeight: 20, fontWeight: '800', textAlign: 'center', paddingHorizontal: 8 }]}>{`第 ${(sliderDraggingRef.current ? currentPage : sliderPage ?? currentPage) + 1} / ${comic.pages.length} 页`}</Text><PressableScale haptic="selection" style={styles.quickAction} accessibilityRole="button" accessibilityLabel="详细设置" onPress={() => setSettings(true)}><Ionicons name="options-outline" size={21} color={menuPrimary} /></PressableScale></View>
         </View>
       </>}
     <ChapterDirectorySheet visible={chapterDirectory} book={book} chapters={chapters} onClose={() => setChapterDirectory(false)} onSelectChapter={onSelectChapter} />
