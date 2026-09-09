@@ -11,6 +11,7 @@ import { BottomTabBar } from '../ui/components/bottom-tab-bar';
 import { useTheme } from '../ui/theme';
 import { setNavigationBarAppearance } from '../platform/system-bars';
 import { cleanupStaleSessionCache } from '../cache';
+import { chapterPrefetcher } from '../reader/chapter-prefetcher';
 
 export type LibraryFeatureProps = {
   series: LibrarySeries[];
@@ -74,6 +75,13 @@ export function AppShell({ features }: { features: FeatureComponents }) {
   const [selectedSeries, setSelectedSeries] = useState<LibrarySeries>();
   const [seriesChapters, setSeriesChapters] = useState<StoredChapter[]>([]);
   const [statsSummary, setStatsSummary] = useState<ReadingStatsSummary>();
+
+  useEffect(() => {
+    if (screen !== 'document') return;
+    // The shell survives chapter switches, so only leaving the reader clears
+    // adjacent sessions. A chapter component unmount must preserve handoff.
+    return () => { void chapterPrefetcher.clear().catch(console.warn); };
+  }, [screen]);
 
   useEffect(() => {
     setNavigationBarAppearance(tokens.colors.background, !isDark);

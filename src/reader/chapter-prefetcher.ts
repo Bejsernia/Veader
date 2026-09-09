@@ -40,8 +40,10 @@ function edgePages(pageCount: number, edge: PrefetchEdge) {
 export class ChapterPrefetcher {
   private readonly entries = new Map<number, CachedChapter>();
   private readonly pending = new Map<number, PendingPrefetch>();
+  private generation = 0;
 
   async prefetch(book: StoredBook, edge: PrefetchEdge, targetWidth: number, openChapter: OpenChapterForPrefetch): Promise<void> {
+    const generation = this.generation;
     const key = chapterKey(book);
     const cached = this.entries.get(book.id);
     if (cached?.key === key) {
@@ -49,12 +51,17 @@ export class ChapterPrefetcher {
       return;
     }
     if (cached) await this.closeEntry(book.id);
+    if (generation !== this.generation) return;
 
     const existing = this.pending.get(book.id);
     if (existing?.key === key) return existing.promise;
-    if (existing) await existing.promise.catch(() => undefined);
+    if (existing) {
+      await existing.promise.catch(() => undefined);
+      if (generation !== this.generation) return;
+      return this.prefetch(book, edge, targetWidth, openChapter);
+    }
 
-    const promise = this.start(book, edge, targetWidth, openChapter, key);
+    const promise = this.start(book, edge, targetWidth, openChapter, key, generation);
     this.pending.set(book.id, { key, promise });
     try {
       await promise;
@@ -64,9 +71,11 @@ export class ChapterPrefetcher {
   }
 
   async take(book: StoredBook): Promise<ContentSession | undefined> {
+    const generation = this.generation;
     const key = chapterKey(book);
     const existing = this.pending.get(book.id);
     if (existing?.key === key) await existing.promise.catch(() => undefined);
+    if (generation !== this.generation) return undefined;
     const cached = this.entries.get(book.id);
     if (!cached) return undefined;
     if (cached.key !== key) {
@@ -78,6 +87,10 @@ export class ChapterPrefetcher {
   }
 
   async clear() {
+    this.generation += 1;
+    // In-flight native work may not support abort. Its generation check closes
+    // the session when it settles without publishing back into this cache.
+    this.pending.clear();
     const ids = [...this.entries.keys()];
     await Promise.all(ids.map(id => this.closeEntry(id)));
   }
@@ -86,14 +99,17 @@ export class ChapterPrefetcher {
     return this.entries.size;
   }
 
-  private async start(book: StoredBook, edge: PrefetchEdge, targetWidth: number, openChapter: OpenChapterForPrefetch, key: string) {
+  private async start(book: StoredBook, edge: PrefetchEdge, targetWidth: number, openChapter: OpenChapterForPrefetch, key: string, generation: number) {
     const sessionId = `prefetch-${book.id}-${Date.now()}-${sessionSequence += 1}`;
     let session: ContentSession | undefined;
     try {
       session = await openChapter(book, sessionId);
+      if (generation !== this.generation) { await session.close(); return; }
       await session.prefetch(edgePages(session.comic.pages.length, edge), { targetWidth });
+      if (generation !== this.generation) { await session.close(); return; }
       const previous = this.entries.get(book.id);
       if (previous) await previous.session.close().catch(() => undefined);
+      if (generation !== this.generation) { await session.close(); return; }
       this.entries.set(book.id, { key, session, lastUsedAt: Date.now() });
       await this.evictOldEntries(book.id);
     } catch (reason) {

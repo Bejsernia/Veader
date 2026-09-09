@@ -26,6 +26,7 @@ const archiveSessions = new Map<string, Promise<string>>();
 const sessionArchiveKeys = new Map<string, string>();
 const archiveRefs = new Map<string, number>();
 const cancelledSessions = new Set<string>();
+const runningBatches = new Map<string, Set<Promise<void>>>();
 
 export function clearEpubMetadataCache() {
   scanCache.clear();
@@ -83,17 +84,32 @@ export async function extractEpubPage(sourceUri: string, entry: string, sessionI
     sessionPages.delete(entry);
   } else if (mappedUri) sessionPages.delete(entry);
   const active = activePages.get(targetUri);
-  if (active) return active;
+  if (active) {
+    try { return await active; } catch (error) {
+      if (cancelledSessions.has(sessionId) || !(error instanceof Error) || error.message !== 'Reader session closed') throw error;
+      return extractEpubPage(sourceUri, entry, sessionId);
+    }
+  }
   const queueKey = sourceUri + '\n' + sessionId;
   const promise = new Promise<string>((resolve, reject) => {
     pendingPages.set(targetUri, { queueKey, sourceUri, entry, sessionId, targetUri, fileName: targetUri.split('/').pop()!, resolve, reject });
     if (!pendingTimers.has(queueKey)) {
-      pendingTimers.set(queueKey, setTimeout(() => { pendingTimers.delete(queueKey); void flushPageQueue(queueKey); }, 0));
+      pendingTimers.set(queueKey, setTimeout(() => {
+        pendingTimers.delete(queueKey);
+        const batches = runningBatches.get(sessionId) ?? new Set<Promise<void>>();
+        runningBatches.set(sessionId, batches);
+        const batch = flushPageQueue(queueKey).finally(() => {
+          batches.delete(batch);
+          if (!batches.size && runningBatches.get(sessionId) === batches) runningBatches.delete(sessionId);
+        });
+        batches.add(batch);
+      }, 0));
     }
   });
-  activePages.set(targetUri, promise);
+  const task = promise.finally(() => { if (activePages.get(targetUri) === task) activePages.delete(targetUri); });
+  activePages.set(targetUri, task);
   sessionPages.set(entry, targetUri);
-  return promise.finally(() => activePages.delete(targetUri));
+  return task;
 }
 
 function pageTargetUri(cacheRoot: string, sourceUri: string, entry: string, sessionId: string, fingerprint: string) {
@@ -156,7 +172,6 @@ async function flushPageQueue(queueKey: string) {
       }
     }
     if (cancelledSessions.has(sessionId)) {
-      await FileSystem.deleteAsync(targetDir, { idempotent: true });
       throw new Error('Reader session closed');
     }
     await trimCacheToLimit();
@@ -172,6 +187,19 @@ async function flushPageQueue(queueKey: string) {
 export async function clearEpubSession(sessionId: string) {
   cancelledSessions.add(sessionId);
   sessionPageUris.delete(sessionId);
+  const sessionError = new Error('Reader session closed');
+  for (const [queueKey, timer] of pendingTimers) {
+    if (!queueKey.endsWith('\n' + sessionId)) continue;
+    clearTimeout(timer);
+    pendingTimers.delete(queueKey);
+  }
+  for (const [targetUri, request] of pendingPages) {
+    if (request.sessionId !== sessionId) continue;
+    pendingPages.delete(targetUri);
+    request.reject(sessionError);
+  }
+  // Wait before releasing an archive still used by prepare/extract.
+  await Promise.allSettled([...(runningBatches.get(sessionId) ?? [])]);
   const archiveKey = sessionArchiveKeys.get(sessionId);
   sessionArchiveKeys.delete(sessionId);
   const scanner = getSafScanner();
@@ -186,17 +214,7 @@ export async function clearEpubSession(sessionId: string) {
   // Extracted pages are fingerprint-scoped persistent cache entries. The
   // staged archive itself is reference-counted and is released once no
   // current/adjacent reader session needs it.
-  const sessionError = new Error('Reader session closed');
-  for (const [queueKey, timer] of pendingTimers) {
-    if (!queueKey.endsWith('\n' + sessionId)) continue;
-    clearTimeout(timer);
-    pendingTimers.delete(queueKey);
-  }
-  for (const [targetUri, request] of pendingPages) {
-    if (request.sessionId !== sessionId) continue;
-    pendingPages.delete(targetUri);
-    request.reject(sessionError);
-  }
+
 }
 
 export function isEpubEntryUri(value: string) {

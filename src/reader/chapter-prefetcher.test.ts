@@ -31,6 +31,35 @@ function session(pageCount: number, prefetchCalls: number[][], closed: number[])
 }
 
 describe('ChapterPrefetcher', () => {
+  it('closes pending work after clear without repopulating the cache', async () => {
+    const prefetcher = new ChapterPrefetcher();
+    const closed: number[] = [];
+    const content = session(4, [], closed);
+    let finish!: () => void;
+    content.prefetch = () => new Promise<void>(resolve => { finish = resolve; });
+    const pending = prefetcher.prefetch(book(1), 'start', 1200, async () => content);
+    await Promise.resolve();
+    await prefetcher.clear();
+    finish();
+    await pending;
+    expect(prefetcher.size).toBe(0);
+    expect(closed).toHaveLength(1);
+  });
+
+  it('does not let old work replace a new session after clear', async () => {
+    const prefetcher = new ChapterPrefetcher();
+    const oldClosed: number[] = [];
+    let finish!: (value: ContentSession) => void;
+    const pending = prefetcher.prefetch(book(1), 'start', 1200, () => new Promise(resolve => { finish = resolve; }));
+    await prefetcher.clear();
+    const next = session(4, [], []);
+    await prefetcher.prefetch(book(1), 'start', 1200, async () => next);
+    finish(session(4, [], oldClosed));
+    await pending;
+    expect(oldClosed).toHaveLength(1);
+    await expect(prefetcher.take(book(1))).resolves.toBe(next);
+  });
+
   it('warms the correct edge and transfers the session to the reader', async () => {
     const prefetchCalls: number[][] = [];
     const closed: number[] = [];
