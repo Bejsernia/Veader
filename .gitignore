@@ -5,6 +5,10 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Local documentation and audit reports
+/doc/
+/docs/
+
 # Expo / Metro local state
 .expo/
 .expo-shared/
