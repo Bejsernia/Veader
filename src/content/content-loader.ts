@@ -18,6 +18,8 @@ import {
 import type { EpubComic } from '../content';
 import { clearEpubSession } from '../epub-native';
 import { getDocumentReader } from '../platform/nativeContracts';
+import { acquireCacheLease } from '../data/cache-leases';
+import { schedulePageCacheTrim, trimSourceCacheToLimit } from '../cache';
 
 export type ContentSession = {
   comic: EpubComic;
@@ -89,23 +91,29 @@ export const contentLoader: ContentLoader = {
   async open(locator, options) {
     const book = bookFromLocator(locator);
     const native = getDocumentReader();
-    const nativeSessionId = native?.openSession
-      ? await native.openSession({ uri: book.localUri, format: book.format, sessionId: options.sessionId })
-      : undefined;
+    const releaseSource = acquireCacheLease(book.localUri);
+    let nativeSessionId: string | undefined;
     let comic: EpubComic;
     try {
+      nativeSessionId = native?.openSession
+        ? await native.openSession({ uri: book.localUri, format: book.format, sessionId: options.sessionId })
+        : undefined;
       comic = book.format === 'epub'
         ? await loadEpubComic(book)
         : book.format === 'mobi'
           ? await loadMobiComic(book, options.sessionId)
           : await loadPdfComic(book);
     } catch (error) {
+      releaseSource();
       if (nativeSessionId && native?.closeSession) await native.closeSession(nativeSessionId).catch(() => undefined);
       throw error;
     }
     const info = toInfo(comic);
+    const retained = new Map<string, () => void>();
+    const pending = new Set<Promise<PageResult>>();
+    let closing: Promise<void> | undefined;
 
-    const getPage = async (index: number, pageOptions: PageOptions): Promise<PageResult> => {
+    const render = async (index: number, pageOptions: PageOptions): Promise<PageResult> => {
       const page = comic.pages[index];
       if (!page) throw new Error('页面索引无效: ' + index);
       const uri = book.format === 'epub'
@@ -113,7 +121,14 @@ export const contentLoader: ContentLoader = {
         : book.format === 'mobi'
           ? await loadMobiPage(book, page, options.sessionId, pageOptions.targetWidth || options.targetWidth || 1600)
           : await loadPdfPage(book, page, pageOptions.targetWidth || options.targetWidth || 1200);
+      if (!retained.has(uri)) retained.set(uri, acquireCacheLease(uri));
       return pageResult(index, uri);
+    };
+    const getPage = (index: number, pageOptions: PageOptions): Promise<PageResult> => {
+      if (closing) return Promise.reject(new Error('阅读会话已关闭'));
+      const task = render(index, pageOptions).finally(() => pending.delete(task));
+      pending.add(task);
+      return task;
     };
 
     return {
@@ -126,10 +141,22 @@ export const contentLoader: ContentLoader = {
       retry(index, pageOptions) {
         return getPage(index, pageOptions);
       },
-      async close() {
-        if (book.format === 'mobi') await clearMobiSession(options.sessionId);
-        if (book.format === 'epub') await clearEpubSession(options.sessionId);
-        if (nativeSessionId && native?.closeSession) await native.closeSession(nativeSessionId);
+      close() {
+        if (!closing) closing = (async () => {
+          try {
+            await Promise.allSettled([...pending]);
+            if (book.format === 'mobi') await clearMobiSession(options.sessionId);
+            if (book.format === 'epub') await clearEpubSession(options.sessionId);
+          } finally {
+            try { if (nativeSessionId && native?.closeSession) await native.closeSession(nativeSessionId); }
+            finally {
+              retained.forEach(release => release()); retained.clear(); releaseSource();
+              schedulePageCacheTrim();
+              void trimSourceCacheToLimit().catch(console.warn);
+            }
+          }
+        })();
+        return closing;
       },
     };
   },

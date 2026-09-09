@@ -21,6 +21,7 @@ jest.mock('../platform/nativeContracts', () => ({
 
 import { contentLoader } from './content-loader';
 import { loadMobiPage } from '../content';
+import { isCacheLeased } from '../data/cache-leases';
 
 const locator = (format: 'epub' | 'pdf' | 'mobi') => ({
   uri: `file:///books/sample.${format}`,
@@ -41,11 +42,18 @@ describe('content loader boundary', () => {
 
   it('opens a session, renders pages through the format adapter and closes it', async () => {
     const session = await contentLoader.open(locator('mobi'), { sessionId: 'reader-1', targetWidth: 1440 });
+    expect(isCacheLeased(locator('mobi').uri)).toBe(true);
 
     await expect(session.getPage(0, { targetWidth: 900 })).resolves.toEqual({ index: 0, uri: 'file:///cache/mobi-page.jpg' });
     await session.prefetch([0], { targetWidth: 900 });
     await session.retry(0, { targetWidth: 900 });
+    expect(isCacheLeased('file:///cache/mobi-page.jpg')).toBe(true);
     await session.close();
+    await session.close();
+    expect(isCacheLeased(locator('mobi').uri)).toBe(false);
+    expect(isCacheLeased('file:///cache/mobi-page.jpg')).toBe(false);
+    await expect(session.getPage(0, { targetWidth: 900 })).rejects.toThrow('已关闭');
+    expect(mockCloseSession).toHaveBeenCalledTimes(1);
 
     expect(mockOpenSession).toHaveBeenCalledWith(expect.objectContaining({ format: 'mobi', sessionId: 'reader-1' }));
     expect(loadMobiPage).toHaveBeenCalledWith(expect.anything(), expect.anything(), 'reader-1', 900);

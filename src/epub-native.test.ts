@@ -8,7 +8,7 @@ const mockRelease = jest.fn(async () => undefined);
 jest.mock('./platform/nativeContracts', () => ({
   getSafScanner: () => ({ prepareEpubSession: mockPrepare, extractEpubEntriesFromSession: mockExtract, releaseEpubSession: mockRelease }),
 }));
-jest.mock('./cache', () => ({ trimCacheToLimit: jest.fn(async () => undefined) }));
+jest.mock('./cache', () => ({ trimCacheToLimit: jest.fn(async () => undefined), withPageCacheWrite: (work: () => Promise<unknown>) => work() }));
 jest.mock('react-native', () => ({ Platform: { OS: 'android' } }));
 jest.mock('expo-file-system', () => ({
   cacheDirectory: 'file:///cache/',

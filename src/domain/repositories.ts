@@ -7,7 +7,7 @@ export interface LibraryRepository {
   configureRoot(): Promise<LibrarySeries[]>;
   refreshAll(): Promise<LibrarySeries[]>;
   refreshSource(sourceId: number): Promise<RefreshResult>;
-  ensureChapterLocal(chapter: StoredChapter): Promise<StoredChapter>;
+  acquireChapterLocal(chapter: StoredChapter): Promise<{ chapter: StoredChapter; release: () => void }>;
   recordContentInfo(chapterId: number, pageCount: number, status?: 'ready' | 'error'): Promise<void>;
   setSeriesCover(seriesId: number, coverUri: string): Promise<string>;
   chooseSeriesCover(seriesId: number): Promise<string | null>;

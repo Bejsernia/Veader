@@ -4,7 +4,7 @@ import { XMLParser } from 'fast-xml-parser';
 import { Platform } from 'react-native';
 import type { StoredBook } from './library';
 import { epubEntryFromUri, extractEpubPage, isEpubEntryUri, normalizePath, scanEpub } from './epub-native';
-import { trimCacheToLimit } from './cache';
+import { trimCacheToLimit, withPageCacheWrite } from './cache';
 import { getDocumentReader } from './platform/nativeContracts';
 
 export type RenderableContent =
@@ -85,7 +85,7 @@ export async function loadMobiComic(book: StoredBook, sessionId: string): Promis
   };
 }
 
-export async function loadMobiPage(book: StoredBook, page: EpubComicPage, sessionId: string, targetWidth = 1600) {
+async function renderMobiPageInternal(book: StoredBook, page: EpubComicPage, sessionId: string, targetWidth = 1600) {
   let session = mobiSessions.get(sessionId);
   if (!session || session.sourceUri !== book.localUri) {
     await loadMobiComic(book, sessionId);
@@ -134,7 +134,7 @@ export async function getPdfPageCount(uri: string) {
   throw new Error('当前平台没有可用的 PDF 原生阅读器');
 }
 
-export async function renderPdfPage(uri: string, pageIndex: number, targetWidth: number) {
+async function renderPdfPageInternal(uri: string, pageIndex: number, targetWidth: number) {
   const native = getDocumentReader();
   if (native?.renderPage) {
     return String(await native.renderPage({ uri, format: 'pdf', pageIndex, targetWidth: Math.round(targetWidth) }));
@@ -142,7 +142,7 @@ export async function renderPdfPage(uri: string, pageIndex: number, targetWidth:
   throw new Error('当前平台没有可用的 PDF 原生阅读器');
 }
 
-export async function cropPageImage(uri: string) {
+async function cropPageImageInternal(uri: string) {
   const native = getDocumentReader();
   if (Platform.OS === 'android' && native?.cropImage) {
     return String(await native.cropImage(uri));
@@ -326,3 +326,13 @@ function concat(chunks: Uint8Array[]) { const length = chunks.reduce((sum, value
 function decodeText(bytes: Uint8Array) { try { return new TextDecoder('utf-8').decode(bytes); } catch { return String.fromCharCode(...bytes.slice(0, 100000)); } }
 function escapeHtml(value: string) { return value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!); }
 function base64ToBytes(base64: string) { const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'; const clean = base64.replace(/=+$/, ''); const output = new Uint8Array(Math.floor(clean.length * 3 / 4)); let buffer = 0, bits = 0, index = 0; for (const char of clean) { const value = chars.indexOf(char); if (value < 0) continue; buffer = (buffer << 6) | value; bits += 6; if (bits >= 8) { bits -= 8; output[index++] = (buffer >> bits) & 255; } } return output.slice(0, index); }
+
+export function loadMobiPage(book: StoredBook, page: EpubComicPage, sessionId: string, targetWidth = 1600) {
+  return withPageCacheWrite(() => renderMobiPageInternal(book, page, sessionId, targetWidth));
+}
+export function renderPdfPage(uri: string, pageIndex: number, targetWidth: number) {
+  return withPageCacheWrite(() => renderPdfPageInternal(uri, pageIndex, targetWidth));
+}
+export function cropPageImage(uri: string) {
+  return withPageCacheWrite(() => cropPageImageInternal(uri));
+}

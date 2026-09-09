@@ -1,4 +1,4 @@
-export type CacheCandidate = { uri: string; size: number; modified: number };
+export type CacheCandidate = { uri: string; size: number; modified: number; protected?: boolean };
 
 /** Returns the oldest files that must be removed to stay under the byte limit. */
 export function selectLruFilesToTrim(files: CacheCandidate[], limitBytes: number) {
@@ -7,6 +7,7 @@ export function selectLruFilesToTrim(files: CacheCandidate[], limitBytes: number
   const removed: CacheCandidate[] = [];
   for (const file of [...files].sort((left, right) => left.modified - right.modified)) {
     if (total <= safeLimit) break;
+    if (file.protected) continue;
     removed.push(file);
     total -= Math.max(0, file.size);
   }

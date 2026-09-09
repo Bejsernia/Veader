@@ -1,5 +1,6 @@
 import * as FileSystem from 'expo-file-system';
 import { selectLruFilesToTrim } from './data/cache-policy';
+import { hasCacheLeaseUnder, isCacheLeased } from './data/cache-leases';
 
 const settingsUri = () => `${FileSystem.documentDirectory}veader-settings.json`;
 const DEFAULT_LIMIT_MB = 512;
@@ -8,6 +9,30 @@ const DEFAULT_SOURCE_LIMIT_MB = 2048;
 type CacheSettings = { pageCacheLimitMb?: number; sourceCacheLimitMb?: number };
 type CacheFile = { uri: string; size: number; modified: number };
 const PAGE_CACHE_ROOTS = ['epub-pages', 'pdf-pages', 'mobi-pages', 'mobi-pages-native', 'cropped-pages'];
+let pageWriters = 0;
+let pageTrimTimer: ReturnType<typeof setTimeout> | undefined;
+let maintenance: Promise<unknown> = Promise.resolve();
+
+function maintain<T>(work: () => Promise<T>): Promise<T> {
+  const task = maintenance.then(work);
+  maintenance = task.catch(() => undefined);
+  return task;
+}
+
+export function schedulePageCacheTrim() {
+  if (pageTrimTimer) clearTimeout(pageTrimTimer);
+  pageTrimTimer = setTimeout(() => {
+    pageTrimTimer = undefined;
+    void trimCacheToLimit().catch(console.warn);
+  }, 100);
+}
+
+/** Defer eviction until writers return their URI and the session can retain it. */
+export async function withPageCacheWrite<T>(work: () => Promise<T>): Promise<T> {
+  pageWriters += 1;
+  try { return await work(); }
+  finally { pageWriters -= 1; if (!pageWriters) schedulePageCacheTrim(); }
+}
 
 async function readSettings(): Promise<CacheSettings> {
   try {
@@ -75,12 +100,15 @@ export async function setSourceCacheLimitMb(value: number) {
 }
 
 export async function trimSourceCacheToLimit(limitMb?: number) {
-  if (!FileSystem.cacheDirectory) return;
-  const limit = (limitMb ?? await getSourceCacheLimitMb()) * 1024 ** 2;
-  const files = await listFiles(FileSystem.cacheDirectory + 'remote-books/');
-  for (const file of selectLruFilesToTrim(files, limit)) {
-    try { await FileSystem.deleteAsync(file.uri, { idempotent: true }); } catch { /* Ignore a file that is currently in use. */ }
-  }
+  return maintain(async () => {
+    if (!FileSystem.cacheDirectory) return;
+    const limit = (limitMb ?? await getSourceCacheLimitMb()) * 1024 ** 2;
+    const files = await listFiles(FileSystem.cacheDirectory + 'remote-books/');
+    for (const file of selectLruFilesToTrim(files.map(file => ({ ...file, protected: isCacheLeased(file.uri) })), limit)) {
+      if (isCacheLeased(file.uri)) continue;
+      try { await FileSystem.deleteAsync(file.uri, { idempotent: true }); } catch { /* Ignore a file that is currently in use. */ }
+    }
+  });
 }
 
 export async function getCacheBreakdown() {
@@ -119,36 +147,47 @@ export async function setPageCacheLimitMb(value: number) {
 }
 
 export async function trimCacheToLimit(limitMb?: number) {
-  if (!FileSystem.cacheDirectory) return;
-  const limit = (limitMb ?? await getPageCacheLimitMb()) * 1024 ** 2;
-  const files = await listPageCacheFiles();
-  for (const file of selectLruFilesToTrim(files, limit)) {
-    try { await FileSystem.deleteAsync(file.uri, { idempotent: true }); } catch { /* Ignore a file that is currently in use. */ }
-  }
+  return maintain(async () => {
+    if (pageWriters) return;
+    if (!FileSystem.cacheDirectory) return;
+    const limit = (limitMb ?? await getPageCacheLimitMb()) * 1024 ** 2;
+    const files = await listPageCacheFiles();
+    for (const file of selectLruFilesToTrim(files.map(file => ({ ...file, protected: isCacheLeased(file.uri) })), limit)) {
+      if (pageWriters) return;
+      if (isCacheLeased(file.uri)) continue;
+      try { await FileSystem.deleteAsync(file.uri, { idempotent: true }); } catch { /* Ignore a file that is currently in use. */ }
+    }
+  });
 }
 
 export async function clearPageCache() {
-  if (!FileSystem.cacheDirectory) return;
-  const roots = ['pdf-pages', 'mobi-pages', 'mobi-pages-native', 'cropped-pages'];
-  await Promise.all(roots.map(root => FileSystem.deleteAsync(`${FileSystem.cacheDirectory}${root}/`, { idempotent: true }).catch(() => undefined)));
-  const epubRoot = `${FileSystem.cacheDirectory}epub-pages/`;
-  try {
-    const children = await FileSystem.readDirectoryAsync(epubRoot);
-    await Promise.all(children.filter(child => !child.split('/').filter(Boolean).pop()?.startsWith('cover-')).map(child => FileSystem.deleteAsync(child.startsWith('file://') ? child : `${epubRoot}${child}`, { idempotent: true }).catch(() => undefined)));
-  } catch { /* The page cache may not exist yet. */ }
+  return maintain(async () => {
+    if (!FileSystem.cacheDirectory) return;
+    const files = await listPageCacheFiles();
+    for (const file of files) {
+      if (pageWriters || isCacheLeased(file.uri)) throw new Error('页面仍在使用，请退出阅读后再清理');
+      await FileSystem.deleteAsync(file.uri, { idempotent: true });
+    }
+  });
 }
 
 export async function clearSourceCache() {
-  if (!FileSystem.cacheDirectory) return;
-  await FileSystem.deleteAsync(`${FileSystem.cacheDirectory}remote-books/`, { idempotent: true });
+  return maintain(async () => {
+    if (!FileSystem.cacheDirectory) return;
+    const files = await listFiles(`${FileSystem.cacheDirectory}remote-books/`);
+    for (const file of files) {
+      if (isCacheLeased(file.uri)) throw new Error('源文件仍在使用，请退出阅读或等待下载结束后再清理');
+      await FileSystem.deleteAsync(file.uri, { idempotent: true });
+    }
+  });
 }
 
 export async function clearSessionCache() {
-  if (!FileSystem.cacheDirectory) return;
-  await Promise.all([
-    FileSystem.deleteAsync(`${FileSystem.cacheDirectory}epub-archives/`, { idempotent: true }),
-    FileSystem.deleteAsync(`${FileSystem.cacheDirectory}epub-pages/`, { idempotent: true }),
-  ]);
+  return maintain(async () => {
+    if (!FileSystem.cacheDirectory) return;
+    if (pageWriters || hasCacheLeaseUnder(FileSystem.cacheDirectory)) throw new Error('阅读会话仍在使用，请退出阅读后再清理');
+    await FileSystem.deleteAsync(`${FileSystem.cacheDirectory}epub-archives/`, { idempotent: true });
+  });
 }
 
 /** Remove session artifacts left by older builds or a forced process stop. */

@@ -6,7 +6,8 @@ import { XMLParser } from 'fast-xml-parser';
 import { epubEntryFromUri, extractEpubPage, scanEpub } from './epub-native';
 import { getDocumentReader, getFolderPicker, getSafScanner } from './platform/nativeContracts';
 import { createRemoteSourceAdapter } from './protocols';
-import { trimSourceCacheToLimit } from './cache';
+import { trimSourceCacheToLimit, withPageCacheWrite } from './cache';
+import { acquireCacheLease } from './data/cache-leases';
 import { getLibraryDatabase, initializeDatabase } from './data/database';
 import { downloadRemoteFile } from './data/remote-download';
 import { buildRemoteCatalog } from './data/remote-catalog';
@@ -110,6 +111,8 @@ export async function setSeriesCover(seriesId: number, coverUri: string) {
 }
 
 async function persistCoverUri(seriesId: number, coverUri: string) {
+  const release = acquireCacheLease(coverUri);
+  try {
   const root = `${FileSystem.documentDirectory}covers/`;
   if (coverUri.startsWith(root)) return coverUri;
   await FileSystem.makeDirectoryAsync(root, { intermediates: true });
@@ -117,6 +120,7 @@ async function persistCoverUri(seriesId: number, coverUri: string) {
   const target = `${root}series-${seriesId}-${Date.now()}.${extension}`;
   await FileSystem.copyAsync({ from: coverUri, to: target });
   return target;
+  } finally { release(); }
 }
 
 async function restoreSeriesCover(row: any, db: SQLite.SQLiteDatabase) {
@@ -365,16 +369,20 @@ async function importRemoteChapter(source: StoredSource, locator: string, entry:
   };
 }
 
-export async function ensureChapterLocal(chapter: StoredChapter): Promise<StoredChapter> {
-  if (!chapter.remotePath || !chapter.sourceId) return chapter;
+export async function acquireChapterLocal(chapter: StoredChapter): Promise<{ chapter: StoredChapter; release: () => void }> {
+  if (!chapter.remotePath || !chapter.sourceId) return { chapter, release: () => undefined };
   const db = await getDatabase();
   const source = await db.getFirstAsync<any>('SELECT * FROM sources WHERE id = ?', chapter.sourceId);
   if (!source || (source.type !== 'ftp' && source.type !== 'smb')) throw new Error('远程来源不存在');
   const adapter = createRemoteSourceAdapter(source.type as 'ftp' | 'smb');
   const fingerprint = chapter.contentFingerprint || String(chapter.remoteSize ?? 0) + ':' + String(chapter.remoteModifiedAt ?? 0);
   const target = await remoteCacheTargetForFingerprint(chapter.sourceId, chapter.remotePath, chapter.format, fingerprint);
+  const releaseTarget = acquireCacheLease(target);
+  const releaseTemporary = acquireCacheLease(target + '.part');
+  const release = () => { releaseTarget(); void trimSourceCacheToLimit().catch(console.warn); };
+  try {
   const info = await FileSystem.getInfoAsync(target, { size: true });
-  const validCache = info.exists && (chapter.remoteSize === undefined || Number((info as any).size ?? -1) === Number(chapter.remoteSize));
+  const validCache = info.exists && Number((info as any).size ?? 0) > 0 && (chapter.remoteSize === undefined || Number((info as any).size ?? -1) === Number(chapter.remoteSize));
   if (!validCache) {
     await downloadRemoteFile({
       adapter,
@@ -386,9 +394,12 @@ export async function ensureChapterLocal(chapter: StoredChapter): Promise<Stored
     await trimSourceCacheToLimit();
   }
   const localInfo = await FileSystem.getInfoAsync(target, { size: true });
+  if (!localInfo.exists || Number((localInfo as any).size ?? 0) <= 0) throw new Error('下载文件已失效，请重试');
   const fileSize = Number((localInfo as any).size ?? chapter.remoteSize ?? 0);
   await db.runAsync("UPDATE chapters SET local_uri = ?, file_size = ?, content_fingerprint = ?, scan_status = 'cached', updated_at = ? WHERE id = ?", target, fileSize, fingerprint, Date.now(), chapter.id);
-  return { ...chapter, localUri: target, fileSize, contentFingerprint: fingerprint, scanStatus: 'cached' };
+  return { chapter: { ...chapter, localUri: target, fileSize, contentFingerprint: fingerprint, scanStatus: 'cached' }, release };
+  } catch (error) { release(); throw error; }
+  finally { releaseTemporary(); }
 }
 
 async function importChapter(uri: string, name: string, format: BookFormat, seriesId: number, chapterNumber: number): Promise<StoredChapter> {
@@ -437,11 +448,11 @@ async function firstPageUri(uri: string, format: BookFormat, seriesId: number): 
   const native = getDocumentReader();
   if (!native) return null;
   try {
-    if (format === 'pdf' && native?.renderPdfPage) return String(await native.renderPdfPage(uri, 0, 720));
+    if (format === 'pdf' && native?.renderPdfPage) return await withPageCacheWrite(async () => String(await native.renderPdfPage!(uri, 0, 720)));
     if (format === 'mobi' && native?.getMobiInfo && native?.renderMobiPage) {
       const info = await native.getMobiInfo(uri);
       const firstRecord = Array.isArray(info?.imageRecords) ? Number(info.imageRecords[0]) : NaN;
-      if (Number.isFinite(firstRecord)) return String(await native.renderMobiPage(uri, firstRecord, 720));
+      if (Number.isFinite(firstRecord)) return await withPageCacheWrite(async () => String(await native.renderMobiPage!(uri, firstRecord, 720)));
     }
   } catch { /* The source may be temporarily unavailable; restore will retry later. */ }
   return null;

@@ -1,7 +1,7 @@
 import {
   chooseSeriesCover,
   configureLibraryRoot,
-  ensureChapterLocal,
+  acquireChapterLocal,
   initializeLibrary,
   listChapters,
   listSeries,
@@ -37,7 +37,7 @@ export const libraryRepository: LibraryRepository = {
   },
   configureRoot: configureLibraryRoot,
   refreshAll: refreshAllLibraries,
-  ensureChapterLocal,
+  acquireChapterLocal,
   recordContentInfo: recordChapterContentInfo,
   setSeriesCover,
   chooseSeriesCover,

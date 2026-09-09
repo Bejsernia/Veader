@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, BackHandler, StatusBar, Text, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { AppScreen as Screen, AppTab as Tab } from './navigation';
@@ -75,12 +75,18 @@ export function AppShell({ features }: { features: FeatureComponents }) {
   const [selectedSeries, setSelectedSeries] = useState<LibrarySeries>();
   const [seriesChapters, setSeriesChapters] = useState<StoredChapter[]>([]);
   const [statsSummary, setStatsSummary] = useState<ReadingStatsSummary>();
+  const sourceRelease = useRef<(() => void) | undefined>();
+  const openingGeneration = useRef(0);
+  useEffect(() => () => { openingGeneration.current += 1; sourceRelease.current?.(); }, []);
 
   useEffect(() => {
     if (screen !== 'document') return;
     // The shell survives chapter switches, so only leaving the reader clears
     // adjacent sessions. A chapter component unmount must preserve handoff.
-    return () => { void chapterPrefetcher.clear().catch(console.warn); };
+    return () => {
+      sourceRelease.current?.(); sourceRelease.current = undefined;
+      void chapterPrefetcher.clear().catch(console.warn);
+    };
   }, [screen]);
 
   useEffect(() => {
@@ -117,6 +123,7 @@ export function AppShell({ features }: { features: FeatureComponents }) {
   }, []);
 
   const goBack = () => {
+    openingGeneration.current += 1;
     const currentScreen = screen;
     setScreen(currentScreen === 'document' ? 'seriesDetail' : 'main');
     if (currentScreen === 'document') {
@@ -160,14 +167,19 @@ export function AppShell({ features }: { features: FeatureComponents }) {
   };
 
   const openChapter = async (chapter: StoredChapter, owner: LibrarySeries | undefined = selectedSeries, position?: 'start' | 'end') => {
+    const generation = ++openingGeneration.current;
     setImporting(true);
     try {
-      const localChapter = await libraryRepository.ensureChapterLocal(chapter);
+      const acquired = await libraryRepository.acquireChapterLocal(chapter);
+      if (generation !== openingGeneration.current) { acquired.release(); return; }
+      sourceRelease.current?.();
+      sourceRelease.current = acquired.release;
+      const localChapter = acquired.chapter;
       setReaderInitialPosition(position);
       setSelectedStored({ ...localChapter, author: owner?.author || localChapter.author || '' });
       setScreen('document');
     } catch (reason) {
-      Alert.alert('无法打开章节', reason instanceof Error ? reason.message : String(reason));
+      if (generation === openingGeneration.current) Alert.alert('无法打开章节', reason instanceof Error ? reason.message : String(reason));
     } finally {
       setImporting(false);
     }
@@ -211,7 +223,7 @@ export function AppShell({ features }: { features: FeatureComponents }) {
     return <SeriesDetail
       series={selectedSeries}
       chapters={seriesChapters}
-      back={() => setScreen('main')}
+      back={goBack}
       openChapter={openChapter}
       continueReading={() => continueSeries(selectedSeries)}
       onSeriesChanged={refreshSelectedSeries}

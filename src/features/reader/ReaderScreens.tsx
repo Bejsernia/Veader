@@ -22,6 +22,8 @@ import { styles, pageLayoutStyles, uiStyles } from '../../ui/legacy-styles';
 import { IconButton } from '../shared/library-ui';
 import { setVolumeKeyPagingEnabled } from '../../platform/volume-keys';
 import { setNavigationBarAppearance } from '../../platform/system-bars';
+import { acquireCacheLease } from '../../data/cache-leases';
+import { schedulePageCacheTrim } from '../../cache';
 
 let comicDarkTheme = true;
 let comicRtlTheme = false;
@@ -32,6 +34,7 @@ function EpubPageView({ book, page, width, height, crop = false, dark = comicDar
   const renderWidth = book.format === 'pdf' ? width : 0;
   useEffect(() => {
     let active = true;
+    let releaseImage: (() => void) | undefined;
     const cachedSource = crop ? '' : pageLoader?.getState(page.index).uri ?? '';
     setSource(cachedSource);
     setError(false);
@@ -43,12 +46,13 @@ function EpubPageView({ book, page, width, height, crop = false, dark = comicDar
     const load = pageLoader ? pageLoader.load(page.index).then(result => result.uri) : Promise.reject(new Error('阅读页面加载器未就绪'));
     load.then(uri => crop ? cropPageImage(uri) : uri).then(uri => {
       if (!active) return;
+      releaseImage = acquireCacheLease(uri);
       setSource(uri);
       Image.getSize(uri, (imageWidth, imageHeight) => {
         if (imageWidth > 0 && imageHeight > 0) onAspectRatio?.(page.imageUri, imageWidth / imageHeight);
       }, () => undefined);
     }).catch(() => active && setError(true));
-    return () => { active = false; unsubscribe?.(); };
+    return () => { active = false; unsubscribe?.(); releaseImage?.(); schedulePageCacheTrim(); };
   }, [book, page, sessionId, crop, renderWidth, pageLoader, onAspectRatio]);
   const image = source ? <Image source={{ uri: source }} style={styles.epubImage} resizeMode="contain" onLoad={event => {
     const imageWidth = event.nativeEvent.source?.width ?? 0; const imageHeight = event.nativeEvent.source?.height ?? 0;
@@ -354,9 +358,11 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
     const task = InteractionManager.runAfterInteractions(() => {
       void Promise.all(candidates.map(async ({ chapter, edge }) => {
         if (!chapter || !active) return;
-        const local = await libraryRepository.ensureChapterLocal(chapter);
-        if (!active) return;
-        await chapterPrefetcher.prefetch(local, edge, width * 2, (target, sessionId) => contentLoader.open(contentLocatorFromBook(target), { sessionId, targetWidth: width * 2 }));
+        const acquired = await libraryRepository.acquireChapterLocal(chapter);
+        try {
+          if (!active) return;
+          await chapterPrefetcher.prefetch(acquired.chapter, edge, width * 2, (target, sessionId) => contentLoader.open(contentLocatorFromBook(target), { sessionId, targetWidth: width * 2 }));
+        } finally { acquired.release(); }
       })).catch(() => undefined);
     });
     return () => { active = false; task.cancel(); };

@@ -2,7 +2,7 @@ import * as FileSystem from 'expo-file-system';
 import { XMLParser } from 'fast-xml-parser';
 import JSZip from 'jszip';
 import { Platform } from 'react-native';
-import { trimCacheToLimit } from './cache';
+import { trimCacheToLimit, withPageCacheWrite } from './cache';
 import { getSafScanner } from './platform/nativeContracts';
 
 export type ScannedEpub = {
@@ -68,7 +68,7 @@ async function sourceFingerprint(sourceUri: string) {
   return value;
 }
 
-export async function extractEpubPage(sourceUri: string, entry: string, sessionId: string) {
+async function extractEpubPageInternal(sourceUri: string, entry: string, sessionId: string) {
   if (cancelledSessions.has(sessionId)) return Promise.reject(new Error('Reader session closed'));
   const cacheRoot = FileSystem.cacheDirectory;
   if (!cacheRoot) throw new Error('应用缓存目录不可用');
@@ -316,4 +316,8 @@ export function normalizePath(path: string) {
     else if (part && part !== '.') parts.push(part);
   }
   return parts.join('/');
+}
+
+export function extractEpubPage(sourceUri: string, entry: string, sessionId: string): Promise<string> {
+  return withPageCacheWrite(() => extractEpubPageInternal(sourceUri, entry, sessionId));
 }
