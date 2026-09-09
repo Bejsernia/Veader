@@ -26,6 +26,40 @@ class FakeFileSystem {
 }
 
 describe('atomic remote download', () => {
+  it('shares one transfer between a reader and a prefetcher', async () => {
+    const fs = new FakeFileSystem();
+    let finish!: () => void;
+    const gate = new Promise<void>(resolve => { finish = resolve; });
+    const source = adapter(async uri => { fs.files.set(uri, 4); await gate; fs.files.set(uri, 12); });
+    const input = { adapter: source, endpoint: 'ftp://test', remotePath: '/book.epub', targetUri: 'file:///cache/book.epub', expectedSize: 12, fileSystem: fs };
+    const first = downloadRemoteFile(input);
+    const second = downloadRemoteFile({ ...input, adapter: adapter(async () => { throw new Error('duplicate transfer'); }) });
+    expect(second).toBe(first);
+    finish();
+    await expect(Promise.all([first, second])).resolves.toEqual([input.targetUri, input.targetUri]);
+    expect(source.download).toHaveBeenCalledTimes(1);
+    expect(fs.moves).toHaveLength(1);
+  });
+
+  it('cleans a failed transfer and lets a subsequent request retry', async () => {
+    const fs = new FakeFileSystem();
+    fs.files.set('file:///cache/book.epub', 12);
+    const source = adapter(async uri => { fs.files.set(uri, 4); throw new Error('network lost'); });
+    const input = { adapter: source, endpoint: 'ftp://test', remotePath: '/book.epub', targetUri: 'file:///cache/book.epub', expectedSize: 12, fileSystem: fs };
+    await expect(downloadRemoteFile(input)).rejects.toThrow('network lost');
+    expect(fs.files.get(input.targetUri)).toBe(12);
+    expect(fs.files.has(input.targetUri + '.part')).toBe(false);
+    expect(source.disconnect).toHaveBeenCalledTimes(1);
+    await expect(downloadRemoteFile({ ...input, adapter: adapter(async uri => { fs.files.set(uri, 12); }) })).resolves.toBe(input.targetUri);
+  });
+
+  it('cleans a failed publication and propagates the original failure', async () => {
+    const fs = new FakeFileSystem();
+    fs.moveAsync = async () => { throw new Error('disk full'); };
+    await expect(downloadRemoteFile({ adapter: adapter(async uri => { fs.files.set(uri, 12); }), endpoint: 'ftp://test', remotePath: '/book.epub', targetUri: 'file:///cache/book.epub', fileSystem: fs })).rejects.toThrow('disk full');
+    expect(fs.files.size).toBe(0);
+  });
+
   it('publishes a complete temporary download and disconnects', async () => {
     const fs = new FakeFileSystem();
     const source = adapter(async uri => { fs.files.set(uri, 12); });
