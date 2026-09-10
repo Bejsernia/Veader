@@ -19,7 +19,7 @@ import type { EpubComic } from '../content';
 import { clearEpubSession } from '../epub-native';
 import { getDocumentReader } from '../platform/nativeContracts';
 import { acquireCacheLease } from '../data/cache-leases';
-import { schedulePageCacheTrim, trimSourceCacheToLimit } from '../cache';
+import { invalidatePageCacheUri, schedulePageCacheTrim, trimSourceCacheToLimit } from '../cache';
 
 export type ContentSession = {
   comic: EpubComic;
@@ -111,6 +111,7 @@ export const contentLoader: ContentLoader = {
     const info = toInfo(comic);
     const retained = new Map<string, () => void>();
     const pending = new Set<Promise<PageResult>>();
+    const pageUris = new Map<number, string>();
     let closing: Promise<void> | undefined;
 
     const render = async (index: number, pageOptions: PageOptions): Promise<PageResult> => {
@@ -122,11 +123,16 @@ export const contentLoader: ContentLoader = {
           ? await loadMobiPage(book, page, options.sessionId, pageOptions.targetWidth || options.targetWidth || 1600)
           : await loadPdfPage(book, page, pageOptions.targetWidth || options.targetWidth || 1200);
       if (!retained.has(uri)) retained.set(uri, acquireCacheLease(uri));
+      pageUris.set(index, uri);
       return pageResult(index, uri);
     };
-    const getPage = (index: number, pageOptions: PageOptions): Promise<PageResult> => {
+    const getPage = (index: number, pageOptions: PageOptions, retry = false): Promise<PageResult> => {
       if (closing) return Promise.reject(new Error('阅读会话已关闭'));
-      const task = render(index, pageOptions).finally(() => pending.delete(task));
+      const task = (async () => {
+        const uri = pageUris.get(index);
+        if (retry && uri) await invalidatePageCacheUri(uri);
+        return render(index, pageOptions);
+      })().finally(() => pending.delete(task));
       pending.add(task);
       return task;
     };
@@ -139,7 +145,7 @@ export const contentLoader: ContentLoader = {
         await Promise.allSettled(indexes.map(index => getPage(index, pageOptions)));
       },
       retry(index, pageOptions) {
-        return getPage(index, pageOptions);
+        return getPage(index, pageOptions, true);
       },
       close() {
         if (!closing) closing = (async () => {

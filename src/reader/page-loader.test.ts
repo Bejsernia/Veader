@@ -1,6 +1,28 @@
 import { PageLoader } from './page-loader';
 
 describe('PageLoader', () => {
+  it('invalidates a ready URI after image failure and coalesces retries', async () => {
+    const retryPage = jest.fn(async index => ({ index, uri: 'file:///recreated.jpg' }));
+    const loader = new PageLoader({ pageCount: 1, loadPage: async index => ({ index, uri: 'file:///missing.jpg' }), retryPage });
+    await loader.load(0);
+    const first = loader.retry(0); const second = loader.retry(0);
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { index: 0, uri: 'file:///recreated.jpg' }, { index: 0, uri: 'file:///recreated.jpg' },
+    ]);
+    expect(retryPage).toHaveBeenCalledTimes(1);
+    loader.dispose();
+  });
+  it('invalidates a ready URI after image failure and coalesces retries', async () => {
+    const retryPage = jest.fn(async index => ({ index, uri: 'file:///recreated.jpg' }));
+    const loader = new PageLoader({ pageCount: 1, loadPage: async index => ({ index, uri: 'file:///missing.jpg' }), retryPage });
+    await loader.load(0);
+    const first = loader.retry(0); const second = loader.retry(0);
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { index: 0, uri: 'file:///recreated.jpg' }, { index: 0, uri: 'file:///recreated.jpg' },
+    ]);
+    expect(retryPage).toHaveBeenCalledTimes(1);
+    loader.dispose();
+  });
   it('loads the requested page before prefetching the next pages', async () => {
     const calls: number[] = [];
     const loader = new PageLoader({

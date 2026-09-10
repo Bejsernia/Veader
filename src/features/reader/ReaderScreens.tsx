@@ -23,19 +23,25 @@ import { IconButton } from '../shared/library-ui';
 import { setVolumeKeyPagingEnabled } from '../../platform/volume-keys';
 import { setNavigationBarAppearance } from '../../platform/system-bars';
 import { acquireCacheLease } from '../../data/cache-leases';
-import { schedulePageCacheTrim } from '../../cache';
+import { invalidatePageCacheUri, schedulePageCacheTrim } from '../../cache';
 
 let comicDarkTheme = true;
 let comicRtlTheme = false;
 function Slider(props: React.ComponentProps<typeof NativeSlider>) { return <NativeSlider {...props} inverted={comicRtlTheme} />; }
 
-function EpubPageView({ book, page, width, height, crop = false, dark = comicDarkTheme, sessionId, pageLoader, onAspectRatio }: { book: StoredBook; page: EpubComicPage; width: number; height: number; crop?: boolean; dark?: boolean; sessionId?: string; pageLoader?: PageLoader; onAspectRatio?: (pageKey: string, ratio: number) => void }) {
+function EpubPageView({ book, page, width, height, crop = false, dark = comicDarkTheme, sessionId, pageLoader, onAspectRatio, onErrorChange }: { book: StoredBook; page: EpubComicPage; width: number; height: number; crop?: boolean; dark?: boolean; sessionId?: string; pageLoader?: PageLoader; onAspectRatio?: (pageKey: string, ratio: number) => void; onErrorChange?: (index: number, failed: boolean) => void }) {
   const [source, setSource] = useState<string>(() => crop ? '' : pageLoader?.getState(page.index).uri ?? ''); const [error, setError] = useState(false);
+  const [retryAttempt, setRetryAttempt] = useState(0);
+  const appliedRetry = useRef(0);
+  const failedImage = useRef('');
+  useEffect(() => { onErrorChange?.(page.index, error); return () => onErrorChange?.(page.index, false); }, [error, page.index, onErrorChange]);
   const renderWidth = book.format === 'pdf' ? width : 0;
   useEffect(() => {
     let active = true;
     let releaseImage: (() => void) | undefined;
-    const cachedSource = crop ? '' : pageLoader?.getState(page.index).uri ?? '';
+    const retryRequested = retryAttempt !== appliedRetry.current;
+    appliedRetry.current = retryAttempt;
+    const cachedSource = crop || retryRequested ? '' : pageLoader?.getState(page.index).uri ?? '';
     setSource(cachedSource);
     setError(false);
     const unsubscribe = pageLoader?.subscribe(state => {
@@ -43,7 +49,13 @@ function EpubPageView({ book, page, width, height, crop = false, dark = comicDar
       if (state.status === 'ready' && state.uri && !crop) setSource(state.uri);
       if (state.status === 'error') setError(true);
     });
-    const load = pageLoader ? pageLoader.load(page.index).then(result => result.uri) : Promise.reject(new Error('阅读页面加载器未就绪'));
+    const load = pageLoader ? (async () => {
+      if (retryRequested) {
+        if (failedImage.current) await invalidatePageCacheUri(failedImage.current);
+        return (await pageLoader.retry(page.index)).uri;
+      }
+      return (await pageLoader.load(page.index)).uri;
+    })() : Promise.reject(new Error('阅读页面加载器未就绪'));
     load.then(uri => crop ? cropPageImage(uri) : uri).then(uri => {
       if (!active) return;
       releaseImage = acquireCacheLease(uri);
@@ -53,11 +65,11 @@ function EpubPageView({ book, page, width, height, crop = false, dark = comicDar
       }, () => undefined);
     }).catch(() => active && setError(true));
     return () => { active = false; unsubscribe?.(); releaseImage?.(); schedulePageCacheTrim(); };
-  }, [book, page, sessionId, crop, renderWidth, pageLoader, onAspectRatio]);
-  const image = source ? <Image source={{ uri: source }} style={styles.epubImage} resizeMode="contain" onLoad={event => {
+  }, [book, page, sessionId, crop, renderWidth, pageLoader, onAspectRatio, retryAttempt]);
+  const image = source && !error ? <Image source={{ uri: source }} style={styles.epubImage} resizeMode="contain" onError={() => { failedImage.current = source; setError(true); }} onLoad={event => {
     const imageWidth = event.nativeEvent.source?.width ?? 0; const imageHeight = event.nativeEvent.source?.height ?? 0;
     if (imageWidth > 0 && imageHeight > 0) onAspectRatio?.(page.imageUri, imageWidth / imageHeight);
-  }} /> : <View style={styles.readerMessage}>{error ? <><Ionicons name="warning-outline" size={32} color="#E1915F" /><Text style={styles.readerChapter}>第 {page.index + 1} 页加载失败</Text></> : <ActivityIndicator color="#8B70F7" />}</View>;
+  }} /> : <View style={styles.readerMessage}>{error ? <><Ionicons name="warning-outline" size={32} color="#E1915F" /><Text style={styles.readerChapter}>第 {page.index + 1} 页加载失败</Text><Pressable accessibilityRole="button" accessibilityLabel={`重试第 ${page.index + 1} 页`} onTouchStart={event => event.stopPropagation()} onTouchEnd={event => event.stopPropagation()} onPress={() => { setError(false); setSource(''); setRetryAttempt(value => value + 1); }} style={{ minWidth: 96, minHeight: 48, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: dark ? '#C8B9FF' : '#7052E8', fontWeight: '700' }}>点击重试</Text></Pressable></> : <ActivityIndicator color="#8B70F7" />}</View>;
   return <View style={[styles.epubPage, { width, height, backgroundColor: dark ? '#09090B' : '#FFFFFF' }]}>{image}</View>;
 }
 
@@ -209,6 +221,13 @@ function ZoomablePage({ width, height, active, tapEnabled = active, children, on
 
 function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, chapters = [], onSelectChapter, initialPosition }: { book: StoredBook; back: () => void; onProgress?: (progress: number, location: string) => void | Promise<void>; onSetCover?: (uri: string) => void; chapters?: StoredChapter[]; onSelectChapter?: (chapter: StoredChapter, position?: 'start' | 'end') => void | Promise<void>; initialPosition?: 'start' | 'end' }) {
   const { tokens, isDark: appIsDark } = useTheme();
+  const [failedPages, setFailedPages] = useState<Set<number>>(new Set());
+  const reportPageError = useCallback((index: number, failed: boolean) => {
+    setFailedPages(previous => {
+      if (previous.has(index) === failed) return previous;
+      const next = new Set(previous); if (failed) next.add(index); else next.delete(index); return next;
+    });
+  }, []);
   const [comic, setComic] = useState<EpubComic>(); const [error, setError] = useState(''); const [menu, setMenu] = useState(false); const [chapterDirectory, setChapterDirectory] = useState(false); const [settings, setSettings] = useState(false);
   const [readingDirection, setReadingDirection] = useState<'ltr' | 'rtl' | 'vertical'>('ltr'); const [tapZones, setTapZones] = useState(true); const [smooth, setSmooth] = useState(true); const [dark, setDark] = useState(true); const [crop, setCrop] = useState(false); const [notch, setNotch] = useState(false); const [volume, setVolume] = useState(true); const [pageMode, setPageMode] = useState<'single' | 'double'>('single'); const [doubleOrder, setDoubleOrder] = useState<'natural' | 'reverse'>('natural');
   const [currentPage, setCurrentPage] = useState(0); const [sliderPage, setSliderPage] = useState<number>(); const currentPageRef = useRef(0); const committedPageRef = useRef(0); const pendingPageRef = useRef<number>(); const seekingPageRef = useRef<number>(); const sliderDraggingRef = useRef(false); const { width, height } = useWindowDimensions(); const insets = useSafeAreaInsets(); const [preferencesReady, setPreferencesReady] = useState(false); const [bookOverrides, setBookOverrides] = useState<Partial<import('../../preferences').ReaderPreferences>>({}); const preferenceSnapshot = useRef<import('../../preferences').ReaderPreferences>({}); const preferredDirection = useRef<'ltr' | 'rtl' | 'vertical'>(); const sessionId = useRef('reader-' + Date.now().toString()).current; const readingSessionRef = useRef<{ id: number; lastPage: number }>(); const listRef = useRef<FlatList<ReaderDisplayPage[]>>(null); const pageLoaderRef = useRef<PageLoader>(); const [pageLoader, setPageLoader] = useState<PageLoader>(); const readerControllerRef = useRef<ReaderController>(); const touchStart = useRef({ x: 0, y: 0, time: 0 }); const touchLatest = useRef({ x: 0, y: 0 }); const gestureStartPageRef = useRef(0); const lastSwipeMovementRef = useRef<number>(); const lastProgress = useRef({ progress: book.progress, location: book.currentLocation || 'epub:0' });
@@ -560,7 +579,7 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
     const sizes = ratios.map(ratio => isVertical ? { width: scale, height: scale / Math.max(0.1, ratio) } : { width: scale * ratio, height: scale });
     const contentWidth = isVertical ? scale : sizes.reduce((sum, size) => sum + size.width, 0);
     const contentHeight = isVertical ? sizes.reduce((sum, size) => sum + size.height, 0) : scale;
-    return <View style={{ width, height, alignItems: 'center', justifyContent: 'center', padding: 0, margin: 0 }}><View style={{ width: contentWidth, height: contentHeight, flexDirection: isVertical ? 'column' : 'row', alignItems: 'center', justifyContent: 'center', padding: 0, margin: 0 }}>{item.map((display, pageIndex) => { const size = sizes[pageIndex]!; return <View key={display.page.imageUri} style={{ width: size.width, height: size.height, margin: 0, padding: 0, overflow: 'hidden' }}><ZoomablePage width={size.width} height={size.height} active={groupIndex === activeGroup} tapEnabled={false} tapAxis={isVertical ? 'vertical' : 'horizontal'} isBoundaryGesture={(dx, dy) => { if (!comic || groupIndex !== activeGroup || zoomedRef.current) return false; const movement = isVertical ? dy : dx; const page = touchStart.current.time ? gestureStartPageRef.current : currentPageRef.current; return chapterBoundaryDelta(movement, readingDirection, page, comic.pages.length) !== 0; }} onBoundarySwipe={(dx, dy) => handleBoundarySwipe(isVertical ? dy : dx, gestureStartPageRef.current)} onZoomChange={value => { if (groupIndex === activeGroup) { zoomedRef.current = value; setZoomed(value); } }} onTap={handleTap}><EpubPageView book={book} page={display.page} width={size.width} height={size.height} crop={crop} dark={dark} sessionId={sessionId} pageLoader={pageLoader} onAspectRatio={reportPageAspectRatio} /></ZoomablePage></View>; })}</View></View>;
+    return <View style={{ width, height, alignItems: 'center', justifyContent: 'center', padding: 0, margin: 0 }}><View style={{ width: contentWidth, height: contentHeight, flexDirection: isVertical ? 'column' : 'row', alignItems: 'center', justifyContent: 'center', padding: 0, margin: 0 }}>{item.map((display, pageIndex) => { const size = sizes[pageIndex]!; return <View key={display.page.imageUri} style={{ width: size.width, height: size.height, margin: 0, padding: 0, overflow: 'hidden' }}><ZoomablePage width={size.width} height={size.height} active={groupIndex === activeGroup} tapEnabled={false} tapAxis={isVertical ? 'vertical' : 'horizontal'} isBoundaryGesture={(dx, dy) => { if (!comic || groupIndex !== activeGroup || zoomedRef.current) return false; const movement = isVertical ? dy : dx; const page = touchStart.current.time ? gestureStartPageRef.current : currentPageRef.current; return chapterBoundaryDelta(movement, readingDirection, page, comic.pages.length) !== 0; }} onBoundarySwipe={(dx, dy) => handleBoundarySwipe(isVertical ? dy : dx, gestureStartPageRef.current)} onZoomChange={value => { if (groupIndex === activeGroup) { zoomedRef.current = value; setZoomed(value); } }} onTap={handleTap}><EpubPageView book={book} page={display.page} width={size.width} height={size.height} crop={crop} dark={dark} sessionId={sessionId} pageLoader={pageLoader} onAspectRatio={reportPageAspectRatio} onErrorChange={reportPageError} /></ZoomablePage></View>; })}</View></View>;
   };
   const pagerAtChapterEdge = Boolean(comic && (currentPageRef.current <= 0 || currentPageRef.current >= comic.pages.length - 1));
   if (error) return <SafeAreaView style={styles.documentReader}><View style={styles.documentTop}><IconButton name="chevron-back" onPress={back} dark /><Text style={styles.readerBook}>{book.title}</Text></View><View style={styles.readerMessage}><Ionicons name="warning-outline" size={38} color="#E1915F" /><Text style={styles.errorText}>{error}</Text></View></SafeAreaView>;
@@ -652,7 +671,7 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
           } else if (displayPages[firstDisplayIndex]) pageChanged(toActual(firstDisplayIndex));
         }}
       />
-      {pagerAtChapterEdge && !zoomed && !menu && <View
+      {pagerAtChapterEdge && !zoomed && !menu && !displayGroups[toGroup(currentPage)]?.some(item => failedPages.has(item.page.index)) && <View
         style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, zIndex: 10, elevation: 10 }}
         onTouchStart={event => {
           const x = event.nativeEvent.pageX ?? event.nativeEvent.locationX;

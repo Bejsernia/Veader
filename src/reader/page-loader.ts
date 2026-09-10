@@ -15,6 +15,7 @@ export type PageLoaderOptions = {
   prefetchDistance?: number;
   concurrency?: number;
   loadPage: (index: number) => Promise<PageResult>;
+  retryPage?: (index: number) => Promise<PageResult>;
 };
 
 type Pending = { resolve: (result: PageResult) => void; reject: (error: Error) => void };
@@ -25,6 +26,8 @@ export class PageLoader {
   private readonly prefetchDistance: number;
   private readonly concurrency: number;
   private readonly loadPageFn: (index: number) => Promise<PageResult>;
+  private readonly retryPageFn: (index: number) => Promise<PageResult>;
+  private readonly retries = new Set<number>();
   private readonly states = new Map<number, PageState>();
   private readonly pending = new Map<number, Pending[]>();
   private readonly queue = new Map<number, number>();
@@ -40,6 +43,7 @@ export class PageLoader {
     this.prefetchDistance = Math.max(0, Math.floor(options.prefetchDistance ?? 4));
     this.concurrency = Math.max(1, Math.floor(options.concurrency ?? 2));
     this.loadPageFn = options.loadPage;
+    this.retryPageFn = options.retryPage ?? options.loadPage;
   }
 
   subscribe(listener: (state: PageState) => void) {
@@ -87,7 +91,10 @@ export class PageLoader {
   retry(index: number) {
     this.assertIndex(index);
     const state = this.states.get(index);
-    if (state?.status === 'error' || state?.status === 'cancelled') this.states.delete(index);
+    if (state?.status !== 'loading') {
+      this.states.delete(index);
+      this.retries.add(index);
+    }
     return this.load(index);
   }
 
@@ -98,6 +105,7 @@ export class PageLoader {
     if (index === undefined) this.generation += 1;
     for (const item of indexes) {
       this.queue.delete(item);
+      this.retries.delete(item);
       const version = (this.versions.get(item) ?? 0) + 1;
       this.versions.set(item, version);
       const state = this.states.get(item);
@@ -145,7 +153,7 @@ export class PageLoader {
     this.active += 1;
     this.publish({ index, status: 'loading' });
     try {
-      const result = await this.loadPageFn(index);
+      const result = await (this.retries.delete(index) ? this.retryPageFn(index) : this.loadPageFn(index));
       if (!this.isCurrent(index, generation, version)) return;
       this.publish({ index, status: 'ready', result, uri: result.uri });
       this.pending.get(index)?.forEach(({ resolve }) => resolve(result));

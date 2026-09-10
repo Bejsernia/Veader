@@ -34,6 +34,13 @@ export async function withPageCacheWrite<T>(work: () => Promise<T>): Promise<T> 
   finally { pageWriters -= 1; if (!pageWriters) schedulePageCacheTrim(); }
 }
 
+/** Only disposable page artifacts may be invalidated; never a source document. */
+export async function invalidatePageCacheUri(uri: string) {
+  const root = FileSystem.cacheDirectory;
+  if (!root || !PAGE_CACHE_ROOTS.some(name => uri.startsWith(`${root}${name}/`))) return;
+  await withPageCacheWrite(() => FileSystem.deleteAsync(uri, { idempotent: true }));
+}
+
 async function readSettings(): Promise<CacheSettings> {
   try {
     const info = await FileSystem.getInfoAsync(settingsUri());

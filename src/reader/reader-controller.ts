@@ -52,6 +52,7 @@ export class ReaderController {
       prefetchDistance: this.options.prefetchDistance ?? 4,
       concurrency: this.options.concurrency ?? 2,
       loadPage: index => session.getPage(index, { targetWidth: this.options.targetWidth }),
+      retryPage: index => session.retry(index, { targetWidth: this.options.targetWidth }),
     });
     const currentPage = Math.max(0, Math.min(Math.max(0, pageCount - 1), Math.round(initialPage)));
     this.session = session;

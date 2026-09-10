@@ -1,6 +1,6 @@
 import * as FileSystem from 'expo-file-system';
 import { acquireCacheLease } from './data/cache-leases';
-import { clearPageCache, clearSessionCache, trimCacheToLimit, trimSourceCacheToLimit, withPageCacheWrite } from './cache';
+import { clearPageCache, clearSessionCache, invalidatePageCacheUri, trimCacheToLimit, trimSourceCacheToLimit, withPageCacheWrite } from './cache';
 
 const mockFiles = new Map<string, number>();
 jest.mock('expo-file-system', () => ({
@@ -15,6 +15,15 @@ jest.mock('expo-file-system', () => ({
 }));
 beforeEach(() => { jest.useFakeTimers(); mockFiles.clear(); jest.clearAllMocks(); });
 afterEach(() => { jest.clearAllTimers(); jest.useRealTimers(); });
+
+it('invalidates broken rendered pages but never deletes the source or a persistent cover', async () => {
+  const page = 'file:///cache/pdf-pages/page.png';
+  const source = 'file:///cache/remote-books/book.pdf';
+  const cover = 'file:///documents/covers/cover.png';
+  [page, source, cover].forEach(uri => mockFiles.set(uri, 12));
+  await invalidatePageCacheUri(page); await invalidatePageCacheUri(source); await invalidatePageCacheUri(cover);
+  expect([...mockFiles.keys()]).toEqual([source, cover]);
+});
 
 it('protects an oversized source until every reader releases it', async () => {
   const uri = 'file:///cache/remote-books/large.epub';
