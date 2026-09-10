@@ -1,39 +1,40 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, BackHandler, DeviceEventEmitter, FlatList, Image, InteractionManager, Modal, PanResponder, PixelRatio, Pressable, ScrollView, StatusBar, Switch, Text, View, useWindowDimensions } from 'react-native';
-import Animated, { cancelAnimation, useAnimatedStyle, useSharedValue, withDecay, withSpring, withTiming } from 'react-native-reanimated';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import NativeSlider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
-import type { StoredBook, StoredChapter } from '../../domain/models';
-import { cropPageImage, type EpubComic, type EpubComicPage } from '../../content';
-import { contentLoader, contentLocatorFromBook } from '../../content/content-loader';
+import NativeSlider from '@react-native-community/slider';
+import React,{ useCallback,useEffect,useMemo,useRef,useState } from 'react';
+import { ActivityIndicator,AppState,BackHandler,DeviceEventEmitter,FlatList,Image,InteractionManager,PanResponder,PixelRatio,Pressable,ScrollView,StatusBar,Text,View,useWindowDimensions } from 'react-native';
+import Animated,{ cancelAnimation,useAnimatedStyle,useSharedValue,withDecay,withSpring,withTiming } from 'react-native-reanimated';
+import { SafeAreaView,useSafeAreaInsets } from 'react-native-safe-area-context';
+import { invalidatePageCacheUri,schedulePageCacheTrim } from '../../cache';
+import { cropPageImage,type EpubComic,type EpubComicPage } from '../../content';
+import { contentLoader,contentLocatorFromBook } from '../../content/content-loader';
+import { acquireCacheLease } from '../../data/cache-leases';
 import { libraryRepository } from '../../data/library-repository';
 import { readerSettingsRepository } from '../../data/reader-settings-repository';
 import { statsRepository } from '../../data/stats-repository';
+import type { StoredBook,StoredChapter } from '../../domain/models';
+import { setNavigationBarAppearance } from '../../platform/system-bars';
+import { setVolumeKeyPagingEnabled } from '../../platform/volume-keys';
+import { chapterBoundaryDelta } from '../../reader/chapter-boundary';
+import { getAdjacentChapter,orderedChapters } from '../../reader/chapter-navigation';
+import { chapterPrefetcher,type PrefetchEdge } from '../../reader/chapter-prefetcher';
 import { PageLoader } from '../../reader/page-loader';
 import { ReaderController } from '../../reader/reader-controller';
-import { getAdjacentChapter, orderedChapters } from '../../reader/chapter-navigation';
-import { chapterBoundaryDelta } from '../../reader/chapter-boundary';
-import { chapterPrefetcher, type PrefetchEdge } from '../../reader/chapter-prefetcher';
-import { ReaderSettingsFields } from './ReaderSettingsFields';
-import { ScreenHeader } from '../../ui/components/screen-header';
+import { BottomSheet } from '../../ui/components/bottom-sheet';
 import { Button } from '../../ui/components/button';
 import { ChapterRow } from '../../ui/components/chapter-row';
-import { BottomSheet } from '../../ui/components/bottom-sheet';
 import { PressableScale } from '../../ui/components/pressable-scale';
-import { useTheme } from '../../ui/theme';
-import { styles, pageLayoutStyles, uiStyles } from '../../ui/legacy-styles';
+import { ScreenHeader } from '../../ui/components/screen-header';
+import { useScreenStyles } from '../../ui/screen-styles';
+import { readerAppearance,useTheme } from '../../ui/theme';
 import { IconButton } from '../shared/library-ui';
-import { setVolumeKeyPagingEnabled } from '../../platform/volume-keys';
-import { setNavigationBarAppearance } from '../../platform/system-bars';
-import { acquireCacheLease } from '../../data/cache-leases';
-import { invalidatePageCacheUri, schedulePageCacheTrim } from '../../cache';
+import { ReaderSettingsFields } from './ReaderSettingsFields';
 
 let comicDarkTheme = true;
 let comicRtlTheme = false;
 function Slider(props: React.ComponentProps<typeof NativeSlider>) { return <NativeSlider {...props} inverted={comicRtlTheme} />; }
 
 function EpubPageView({ book, page, width, height, crop = false, dark = comicDarkTheme, sessionId, pageLoader, onAspectRatio, onErrorChange }: { book: StoredBook; page: EpubComicPage; width: number; height: number; crop?: boolean; dark?: boolean; sessionId?: string; pageLoader?: PageLoader; onAspectRatio?: (pageKey: string, ratio: number) => void; onErrorChange?: (index: number, failed: boolean) => void }) {
+  const { styles } = useScreenStyles();
   const [source, setSource] = useState<string>(() => crop ? '' : pageLoader?.getState(page.index).uri ?? ''); const [error, setError] = useState(false);
   const [retryAttempt, setRetryAttempt] = useState(0);
   const appliedRetry = useRef(0);
@@ -73,8 +74,8 @@ function EpubPageView({ book, page, width, height, crop = false, dark = comicDar
   const image = source && !error ? <Image source={{ uri: source }} style={styles.epubImage} resizeMode="contain" onError={() => { failedImage.current = source; setError(true); }} onLoad={event => {
     const imageWidth = event.nativeEvent.source?.width ?? 0; const imageHeight = event.nativeEvent.source?.height ?? 0;
     if (imageWidth > 0 && imageHeight > 0) onAspectRatio?.(page.imageUri, imageWidth / imageHeight);
-  }} /> : <View style={styles.readerMessage}>{error ? <><Ionicons name="warning-outline" size={32} color="#E1915F" /><Text style={styles.readerChapter}>第 {page.index + 1} 页加载失败</Text><Pressable accessibilityRole="button" accessibilityLabel={`重试第 ${page.index + 1} 页`} onTouchStart={event => event.stopPropagation()} onTouchEnd={event => event.stopPropagation()} onPress={() => { setError(false); setSource(''); setRetryAttempt(value => value + 1); }} style={{ minWidth: 96, minHeight: 48, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: dark ? '#C8B9FF' : '#7052E8', fontWeight: '700' }}>点击重试</Text></Pressable></> : <ActivityIndicator color="#8B70F7" />}</View>;
-  return <View style={[styles.epubPage, { width, height, backgroundColor: dark ? '#09090B' : '#FFFFFF' }]}>{image}</View>;
+  }} /> : <View style={styles.readerMessage}>{error ? <><Ionicons name="warning-outline" size={32} color={readerAppearance.dark.accent} /><Text style={styles.readerChapter}>第 {page.index + 1} 页加载失败</Text><Pressable accessibilityRole="button" accessibilityLabel={`重试第 ${page.index + 1} 页`} onTouchStart={event => event.stopPropagation()} onTouchEnd={event => event.stopPropagation()} onPress={() => { setError(false); setSource(''); setRetryAttempt(value => value + 1); }} style={{ minWidth: 96, minHeight: 48, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: readerAppearance[dark ? 'dark' : 'light'].accent, fontWeight: '700' }}>点击重试</Text></Pressable></> : <ActivityIndicator color={readerAppearance.dark.accent} />}</View>;
+  return <View style={[styles.epubPage, { width, height, backgroundColor: readerAppearance[dark ? 'dark' : 'light'].canvas }]}>{image}</View>;
 }
 
 type ReaderDisplayPage = { page: EpubComicPage };
@@ -218,6 +219,7 @@ function ZoomablePage({ width, height, active, tapEnabled = active, children, on
 }
 
 function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, chapters = [], onSelectChapter, initialPosition }: { book: StoredBook; back: () => void; onProgress?: (progress: number, location: string) => void | Promise<void>; onSetCover?: (uri: string) => void; chapters?: StoredChapter[]; onSelectChapter?: (chapter: StoredChapter, position?: 'start' | 'end') => void | Promise<void>; initialPosition?: 'start' | 'end' }) {
+  const { styles } = useScreenStyles();
   const { tokens, isDark: appIsDark } = useTheme();
   const [failedPages, setFailedPages] = useState<Set<number>>(new Set());
   const reportPageError = useCallback((index: number, failed: boolean) => {
@@ -240,7 +242,7 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
   useEffect(() => {
     if (!comic) return;
     const sheetOpen = chapterDirectory || settings;
-    const background = sheetOpen ? tokens.colors.surface : dark ? '#09090B' : '#FFFFFF';
+    const background = sheetOpen ? tokens.colors.surface : readerAppearance[dark ? 'dark' : 'light'].canvas;
     setNavigationBarAppearance(background, sheetOpen ? !appIsDark : !dark);
     return () => setNavigationBarAppearance(tokens.colors.background, !appIsDark);
   }, [appIsDark, chapterDirectory, comic, dark, settings, tokens.colors.background, tokens.colors.surface]);
@@ -496,10 +498,10 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
   // Reader controls follow the app-wide appearance. The page canvas toggle
   // only changes the manga background and must not recolor the controls.
   const menuDark = appIsDark;
-  const menuPrimary = menuDark ? '#FFFFFF' : '#28262D';
-  const menuMuted = menuDark ? '#A7A4AC' : '#77727F';
-  const menuBackground = menuDark ? 'rgba(8,8,10,.94)' : 'rgba(248,247,250,.96)';
-  const menuTrack = menuDark ? '#55515B' : '#D0CBD8';
+  const menuPrimary = readerAppearance[menuDark ? 'dark' : 'light'].text;
+  const menuMuted = readerAppearance[menuDark ? 'dark' : 'light'].muted;
+  const menuBackground = readerAppearance[menuDark ? 'dark' : 'light'].overlay;
+  const menuTrack = readerAppearance[menuDark ? 'dark' : 'light'].track;
   const [pageRatios, setPageRatios] = useState<Record<string, number>>({});
   const reportPageAspectRatio = useCallback((pageKey: string, ratio: number) => { setPageRatios(previous => previous[pageKey] === ratio ? previous : { ...previous, [pageKey]: ratio }); }, []);
   const handleBoundarySwipe = (movement: number, page = currentPageRef.current) => {
@@ -580,9 +582,9 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
     return <View style={{ width, height, alignItems: 'center', justifyContent: 'center', padding: 0, margin: 0 }}><View style={{ width: contentWidth, height: contentHeight, flexDirection: isVertical ? 'column' : 'row', alignItems: 'center', justifyContent: 'center', padding: 0, margin: 0 }}>{item.map((display, pageIndex) => { const size = sizes[pageIndex]!; return <View key={display.page.imageUri} style={{ width: size.width, height: size.height, margin: 0, padding: 0, overflow: 'hidden' }}><ZoomablePage width={size.width} height={size.height} active={groupIndex === activeGroup} tapEnabled={false} tapAxis={isVertical ? 'vertical' : 'horizontal'} isBoundaryGesture={(dx, dy) => { if (!comic || groupIndex !== activeGroup || zoomedRef.current) return false; const movement = isVertical ? dy : dx; const page = touchStart.current.time ? gestureStartPageRef.current : currentPageRef.current; return chapterBoundaryDelta(movement, readingDirection, page, comic.pages.length) !== 0; }} onBoundarySwipe={(dx, dy) => handleBoundarySwipe(isVertical ? dy : dx, gestureStartPageRef.current)} onZoomChange={value => { if (groupIndex === activeGroup) { zoomedRef.current = value; setZoomed(value); } }} onTap={handleTap}><EpubPageView book={book} page={display.page} width={size.width} height={size.height} crop={crop} dark={dark} sessionId={sessionId} pageLoader={pageLoader} onAspectRatio={reportPageAspectRatio} onErrorChange={reportPageError} /></ZoomablePage></View>; })}</View></View>;
   };
   const pagerAtChapterEdge = Boolean(comic && (currentPageRef.current <= 0 || currentPageRef.current >= comic.pages.length - 1));
-  if (error) return <SafeAreaView style={styles.documentReader}><View style={styles.documentTop}><IconButton name="chevron-back" onPress={back} dark /><Text style={styles.readerBook}>{book.title}</Text></View><View style={styles.readerMessage}><Ionicons name="warning-outline" size={38} color="#E1915F" /><Text style={styles.errorText}>{error}</Text></View></SafeAreaView>;
-  if (!comic) return <SafeAreaView style={styles.documentReader}><View style={styles.readerMessage}><ActivityIndicator color="#8B70F7" size="large" /><Text style={styles.readerChapter}>正在建立 {book.format.toUpperCase()} 页表…</Text></View></SafeAreaView>;
-    return <View style={[styles.comicReader, { backgroundColor: dark ? '#09090B' : '#FFFFFF' }]}>
+  if (error) return <SafeAreaView style={styles.documentReader}><View style={styles.documentTop}><IconButton name="chevron-back" onPress={back} dark /><Text style={styles.readerBook}>{book.title}</Text></View><View style={styles.readerMessage}><Ionicons name="warning-outline" size={38} color={readerAppearance.dark.accent} /><Text style={styles.errorText}>{error}</Text></View></SafeAreaView>;
+  if (!comic) return <SafeAreaView style={styles.documentReader}><View style={styles.readerMessage}><ActivityIndicator color={readerAppearance.dark.accent} size="large" /><Text style={styles.readerChapter}>正在建立 {book.format.toUpperCase()} 页表…</Text></View></SafeAreaView>;
+    return <View style={[styles.comicReader, { backgroundColor: readerAppearance[dark ? 'dark' : 'light'].canvas }]}>
       <StatusBar hidden barStyle={menuDark ? 'light-content' : 'dark-content'} />
       <View style={{ flex: 1 }} {...boundaryPanResponder.panHandlers}>
       <FlatList
@@ -696,7 +698,7 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
         </View>
         <View style={[styles.epubBottom, styles.readerMenuSurface, styles.readerOverlay, { backgroundColor: menuBackground }]}>
           <Text numberOfLines={1} style={[styles.chapterLabel, { color: menuMuted }]}>{comic.title} · 整卷</Text>
-          <Slider style={styles.readerSlider} minimumValue={0} maximumValue={comic.pages.length - 1} step={1} value={sliderPage ?? currentPage} minimumTrackTintColor="#8B70F7" maximumTrackTintColor={menuTrack} thumbTintColor={menuPrimary} onValueChange={value => { sliderDraggingRef.current = true; setSliderPage(Math.round(value)); }} onSlidingComplete={value => { const target = Math.round(value); seekingPageRef.current = target; setSliderPage(target); goTo(target); }} />
+          <Slider style={styles.readerSlider} minimumValue={0} maximumValue={comic.pages.length - 1} step={1} value={sliderPage ?? currentPage} minimumTrackTintColor={readerAppearance[menuDark ? 'dark' : 'light'].accent} maximumTrackTintColor={menuTrack} thumbTintColor={menuPrimary} onValueChange={value => { sliderDraggingRef.current = true; setSliderPage(Math.round(value)); }} onSlidingComplete={value => { const target = Math.round(value); seekingPageRef.current = target; setSliderPage(target); goTo(target); }} />
           <View style={styles.quickActions}><PressableScale haptic="selection" style={styles.quickAction} accessibilityRole="button" accessibilityLabel="章节目录" onPress={() => chapters.length ? setChapterDirectory(true) : navigateBack()}><Ionicons name="list-outline" size={21} color={menuPrimary} /></PressableScale><Text numberOfLines={1} style={[styles.epubCounter, { flex: 1, minWidth: 120, color: menuPrimary, fontSize: 14, lineHeight: 20, fontWeight: '800', textAlign: 'center', paddingHorizontal: 8 }]}>{`第 ${(sliderDraggingRef.current ? currentPage : sliderPage ?? currentPage) + 1} / ${comic.pages.length} 页`}</Text><PressableScale haptic="selection" style={styles.quickAction} accessibilityRole="button" accessibilityLabel="详细设置" onPress={() => setSettings(true)}><Ionicons name="options-outline" size={21} color={menuPrimary} /></PressableScale></View>
         </View>
       </>}

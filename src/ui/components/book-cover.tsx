@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { StyleProp, View, ViewStyle } from 'react-native';
-import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
+import React,{ useState } from 'react';
+import { StyleProp,View,ViewStyle } from 'react-native';
 import { useTheme } from '../theme';
 
 export function BookCover({ uri, style }: { uri?: string | null; style?: StyleProp<ViewStyle> }) {

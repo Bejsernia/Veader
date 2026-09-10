@@ -1,36 +1,37 @@
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, ScrollView, Switch, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
-import type { StoredSource } from '../../domain/models';
+import React,{ useEffect,useState } from 'react';
+import { ActivityIndicator,FlatList,Pressable,ScrollView,Switch,Text,View } from 'react-native';
+import { Gesture,GestureDetector } from 'react-native-gesture-handler';
+import Animated,{ useAnimatedStyle,useSharedValue,withSpring } from 'react-native-reanimated';
 import { libraryRepository } from '../../data/library-repository';
 import { sourceRepository } from '../../data/source-repository';
-import { deleteRemoteCredentials, saveRemoteCredentials } from '../../protocols';
-import { useTheme } from '../../ui/theme';
+import type { StoredSource } from '../../domain/models';
+import { deleteRemoteCredentials,saveRemoteCredentials } from '../../protocols';
 import { PressableScale } from '../../ui/components/pressable-scale';
-import { styles, layoutStyles, uiStyles } from '../../ui/legacy-styles';
+import { useScreenStyles } from '../../ui/screen-styles';
+import { useTheme } from '../../ui/theme';
 import { IconButton } from '../shared/library-ui';
 
-import { Screen } from '../../ui/components/screen';
-import { ScreenHeader } from '../../ui/components/screen-header';
+import { useWindowDimensions } from 'react-native';
 import { BottomSheet } from '../../ui/components/bottom-sheet';
-import { TextField } from '../../ui/components/text-field';
 import { Button } from '../../ui/components/button';
 import { EmptyState } from '../../ui/components/empty-state';
+import { Screen } from '../../ui/components/screen';
+import { ScreenHeader } from '../../ui/components/screen-header';
 import { SegmentedControl } from '../../ui/components/segmented-control';
+import { TextField } from '../../ui/components/text-field';
 import { getGridLayout } from '../../ui/layout';
-import { useWindowDimensions } from 'react-native';
 type SourceKind = '本地文件夹' | 'SMB' | 'FTP';
 const SOURCE_DELETE_WIDTH = 60;
 
 export function SwipeableSourceRow({ source, isDark, onRemove, onToggle, onRename }: { source: StoredSource; isDark: boolean; onRemove: () => void; onToggle: (enabled: boolean) => void; onRename: () => void }) {
+  const { styles, layoutStyles, uiStyles } = useScreenStyles();
   const { tokens } = useTheme();
   const translateX = useSharedValue(0);
   const pan = Gesture.Pan().activeOffsetX([-10, 10]).onUpdate(event => { translateX.value = Math.max(-SOURCE_DELETE_WIDTH, Math.min(0, event.translationX)); }).onEnd(() => { translateX.value = withSpring(translateX.value < -SOURCE_DELETE_WIDTH * 0.55 ? -SOURCE_DELETE_WIDTH : 0); });
   const animatedStyle = useAnimatedStyle(() => ({ transform: [{ translateX: translateX.value }] }));
   return <View style={styles.sourceSwipe}>
-    <Pressable accessibilityRole="button" accessibilityLabel={`删除漫画源 ${source.name}`} style={[styles.sourceDelete, layoutStyles.sourceDeleteInset]} onPress={onRemove}><Ionicons name="trash-outline" size={21} color="#fff" /><Text style={styles.sourceDeleteText}>删除</Text></Pressable>
+    <Pressable accessibilityRole="button" accessibilityLabel={`删除漫画源 ${source.name}`} style={[styles.sourceDelete, layoutStyles.sourceDeleteInset]} onPress={onRemove}><Ionicons name="trash-outline" size={21} color={tokens.colors.onPrimary} /><Text style={styles.sourceDeleteText}>删除</Text></Pressable>
     <GestureDetector gesture={pan}><Animated.View style={[styles.sourceCard, layoutStyles.sourceCardInset, isDark && styles.cardDark, animatedStyle]}><PressableScale haptic="light" accessibilityRole="button" accessibilityLabel={`${source.name}，长按重命名，向左滑显示删除`} onLongPress={onRename} style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
       <View style={[styles.sourceIcon, { backgroundColor: tokens.colors.selectedContainer }]}><Ionicons name={source.type === 'local' ? 'folder' : 'server'} size={23} color={tokens.colors.onSelectedContainer} /></View>
       <View style={[styles.flex, { minWidth: 0 }]}><Text numberOfLines={2} ellipsizeMode="tail" style={[styles.rowTitle, isDark && styles.textPrimaryDark]}>{source.name}</Text><Text numberOfLines={1} ellipsizeMode="tail" style={[styles.meta, isDark && styles.textMutedDark]}>{source.type.toUpperCase()} · {source.endpoint}</Text><Text numberOfLines={1} ellipsizeMode="tail" style={[styles.sourceStatus, isDark && uiStyles.sourceStatusDark]}>{source.bookCount} 部作品 · {source.type === 'local' ? '长按重命名' : '原生协议扫描'}</Text></View>

@@ -1,11 +1,10 @@
 import React from 'react';
-import { Text, View } from 'react-native';
-import { BookCover } from './book-cover';
-import { ProgressBar } from './progress-bar';
-import { Ionicons } from '@expo/vector-icons';
-import Animated, { FadeInUp } from 'react-native-reanimated';
+import { Text,View } from 'react-native';
+import Animated,{ FadeInUp } from 'react-native-reanimated';
 import { useTheme } from '../theme';
+import { BookCover } from './book-cover';
 import { PressableScale } from './pressable-scale';
+import { ProgressBar } from './progress-bar';
 
 type Props = { title: string; author?: string; coverUri?: string | null; progress?: number; footer?: React.ReactNode; index?: number; onPress?: () => void };
 

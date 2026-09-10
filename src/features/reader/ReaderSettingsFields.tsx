@@ -1,10 +1,10 @@
 import React from 'react';
-import { Switch, Text, View } from 'react-native';
+import { Switch,Text,View } from 'react-native';
 import type { ReaderPreferences } from '../../preferences';
-import { useTheme } from '../../ui/theme';
 import { SegmentedControl } from '../../ui/components/segmented-control';
-import { SettingsRow } from '../../ui/components/settings-row';
 import { SettingsGroup } from '../../ui/components/settings-group';
+import { SettingsRow } from '../../ui/components/settings-row';
+import { useTheme } from '../../ui/theme';
 
 export function ReaderSettingsFields({ value, onChange }: { value: ReaderPreferences; onChange: (patch: ReaderPreferences) => void }) {
   const { tokens } = useTheme();

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text, TextInput, TextInputProps, View } from 'react-native';
+import { Text,TextInput,TextInputProps,View } from 'react-native';
 import { useTheme } from '../theme';
 
 export function TextField({ label, error, style, ...props }: TextInputProps & { label: string; error?: string }) {

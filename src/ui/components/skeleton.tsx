@@ -1,6 +1,6 @@
-import React, { useEffect } from 'react';
-import { View, ViewStyle } from 'react-native';
-import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
+import React,{ useEffect } from 'react';
+import { ViewStyle } from 'react-native';
+import Animated,{ useAnimatedStyle,useSharedValue,withRepeat,withTiming } from 'react-native-reanimated';
 import { useTheme } from '../theme';
 
 export function Skeleton({ style }: { style?: ViewStyle }) {

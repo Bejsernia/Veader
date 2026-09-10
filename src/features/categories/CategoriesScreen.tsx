@@ -1,37 +1,42 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, FlatList, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import type { Category, LibrarySeries, LibraryTag } from '../../domain/models';
+import React,{ useEffect,useMemo,useState } from 'react';
+import { Alert,FlatList,Pressable,ScrollView,Text,View,useWindowDimensions } from 'react-native';
 import { categoryRepository } from '../../data/category-repository';
 import { tagRepository } from '../../data/tag-repository';
+import type { Category,LibrarySeries,LibraryTag } from '../../domain/models';
 import { BottomSheet } from '../../ui/components/bottom-sheet';
-import { BookCard } from '../../ui/components/book-card';
+import { Button } from '../../ui/components/button';
+import { EmptyState } from '../../ui/components/empty-state';
 import { PressableScale } from '../../ui/components/pressable-scale';
+import { Screen } from '../../ui/components/screen';
+import { ScreenHeader } from '../../ui/components/screen-header';
+import { SectionHeader } from '../../ui/components/section-header';
+import { TagChip as BaseTagChip } from '../../ui/components/tag-chip';
+import { TextField } from '../../ui/components/text-field';
 import { getGridLayout } from '../../ui/layout';
-import { styles, categoryStyles, categoryUiStyles, layoutStyles, pageLayoutStyles, uiStyles } from '../../ui/legacy-styles';
+import { useScreenStyles } from '../../ui/screen-styles';
 import { useTheme } from '../../ui/theme';
-import { SeriesProgress, IconButton } from '../shared/library-ui';
+import { IconButton,SeriesCard } from '../shared/library-ui';
 
 type Props = { series: LibrarySeries[]; openSeries: (series: LibrarySeries) => void };
 type DisplayCategory = Category & { automatic?: boolean };
 
 function TagChip({ tag, selected, onPress }: { tag: LibraryTag; selected?: boolean; onPress?: () => void }) {
-  const { isDark } = useTheme();
-  return <PressableScale onPress={onPress} accessibilityRole={onPress ? 'button' : undefined} style={[styles.tagChip, selected && styles.tagChipActive, isDark && styles.tagChipDark, isDark && selected && styles.tagChipActiveDark]}>
-    <Ionicons name={tag.kind === 'author' ? 'person-outline' : 'pricetag-outline'} size={13} color={selected ? '#fff' : isDark ? '#C8B9FF' : '#7257E7'} />
-    <Text numberOfLines={1} style={[styles.tagChipText, selected && styles.tagChipTextActive, isDark && !selected && styles.textMutedDark]}>{tag.name}</Text>
-  </PressableScale>;
+  return <BaseTagChip label={tag.name} author={tag.kind === 'author'} selected={selected} onPress={onPress} />;
 }
 
 function CategoryIcon({ category, isDark }: { category: DisplayCategory; isDark: boolean }) {
+  const { tokens } = useTheme();
+  const { styles } = useScreenStyles();
   const tag = category.tags[0];
   return <View style={[styles.categoryIcon, isDark && styles.scanCardDark]}>
-    <Ionicons name={category.automatic && tag?.kind === 'author' ? 'person-outline' : 'albums-outline'} size={22} color={isDark ? '#C8B9FF' : '#7257E7'} />
+    <Ionicons name={category.automatic && tag?.kind === 'author' ? 'person-outline' : 'albums-outline'} size={22} color={isDark ? tokens.colors.primary : tokens.colors.primary} />
   </View>;
 }
 
 function AutomaticCategoryTile({ category, isDark, onPress }: { category: DisplayCategory; isDark: boolean; onPress: () => void }) {
+  const { tokens } = useTheme();
+  const { styles, categoryStyles } = useScreenStyles();
   const isAuthor = category.tags[0]?.kind === 'author';
   return <PressableScale
     onPress={onPress}
@@ -40,17 +45,19 @@ function AutomaticCategoryTile({ category, isDark, onPress }: { category: Displa
     style={[categoryStyles.automaticCategoryTile, isAuthor ? categoryStyles.automaticAuthorTile : categoryStyles.automaticTagTile, isDark && (isAuthor ? categoryStyles.automaticAuthorTileDark : categoryStyles.automaticTagTileDark)]}
   >
     <View style={[categoryStyles.automaticCategoryIcon, isAuthor ? categoryStyles.automaticAuthorIcon : categoryStyles.automaticTagIcon, isDark && (isAuthor ? categoryStyles.automaticAuthorIconDark : categoryStyles.automaticTagIconDark)]}>
-      <Ionicons name={isAuthor ? 'person-outline' : 'pricetag-outline'} size={18} color={isDark ? '#D6C9FF' : isAuthor ? '#7257E7' : '#756D80'} />
+      <Ionicons name={isAuthor ? 'person-outline' : 'pricetag-outline'} size={18} color={isDark ? tokens.colors.primary : isAuthor ? tokens.colors.primary : tokens.colors.mutedText} />
     </View>
     <View style={categoryStyles.automaticCategoryBody}>
       <Text numberOfLines={1} ellipsizeMode="tail" style={[categoryStyles.automaticCategoryName, isDark && styles.textPrimaryDark]}>{category.name}</Text>
       <Text style={[categoryStyles.automaticCategoryCount, isDark && styles.textMutedDark]}>{category.bookCount} 部作品</Text>
     </View>
-    <Ionicons name="chevron-forward" size={17} color={isDark ? '#B9A5FF' : '#9A86E8'} />
+    <Ionicons name="chevron-forward" size={17} color={isDark ? tokens.colors.primary : tokens.colors.primary} />
   </PressableScale>;
 }
 
 export function CategoriesScreen({ series, openSeries }: Props) {
+  const { tokens } = useTheme();
+  const { styles, categoryStyles, pageLayoutStyles, uiStyles, categoryUiStyles } = useScreenStyles();
   const { isDark } = useTheme();
   const { width } = useWindowDimensions();
   const grid = getGridLayout(width);
@@ -129,17 +136,17 @@ export function CategoriesScreen({ series, openSeries }: Props) {
           </View>
         </PressableScale>
         <Pressable accessibilityRole="button" accessibilityLabel={`编辑${category.name}`} onPress={() => openEditor(category)} style={styles.iconAction}>
-          <Ionicons name="create-outline" size={19} color={isDark ? '#C8B9FF' : '#7257E7'} />
+          <Ionicons name="create-outline" size={19} color={isDark ? tokens.colors.primary : tokens.colors.primary} />
         </Pressable>
         <Pressable accessibilityRole="button" accessibilityLabel={`删除${category.name}`} onPress={() => remove(category)} style={styles.iconAction}>
-          <Ionicons name="trash-outline" size={19} color={isDark ? '#F5A9B7' : '#C84459'} />
+          <Ionicons name="trash-outline" size={19} color={isDark ? tokens.colors.danger : tokens.colors.danger} />
         </Pressable>
       </View>
-      <View style={styles.tagList}>{category.tags.length ? category.tags.map(tag => <TagChip key={tag.id} tag={tag} />) : <Text style={[styles.meta, isDark && styles.textMutedDark]}>未绑定 tag</Text>}</View>
+      <View style={styles.tagList}>{category.tags.length ? category.tags.map(tag => <TagChip key={tag.id} tag={tag} />) : <Text style={[styles.meta, isDark && styles.textMutedDark]}>未绑定标签</Text>}</View>
     </View>
   );
 
-  if (selected) return <SafeAreaView style={[styles.safe, isDark && styles.safeDark]}>
+  const selectedContent = selected ? <Screen safeArea={false}>
     <FlatList
       key={grid.columns}
       data={selectedSeries}
@@ -148,26 +155,19 @@ export function CategoriesScreen({ series, openSeries }: Props) {
       contentContainerStyle={[styles.page, isDark && styles.pageDark, { paddingHorizontal: grid.pageInset }]}
       columnWrapperStyle={{ gap: grid.gutter }}
       ListHeaderComponent={<View>
-        <View style={[styles.header, pageLayoutStyles.pageHeader, categoryUiStyles.centeredHeader, layoutStyles.subpageHeader]}>
-          <IconButton name="chevron-back" label="返回分类" onPress={() => setSelected(undefined)} />
-          <Text numberOfLines={1} style={[styles.navTitle, isDark && styles.textPrimaryDark]}>{selected.name}</Text>
-          {!selected.automatic ? <PressableScale accessibilityRole="button" accessibilityLabel="编辑分类" onPress={() => openEditor(selected)} style={pageLayoutStyles.trailingAction}><Ionicons name="create-outline" size={21} color={isDark ? '#C8B9FF' : '#7257E7'} /></PressableScale> : <View style={pageLayoutStyles.headerSpacer} />}
-        </View>
+        <ScreenHeader title={selected.name} back={() => setSelected(undefined)} trailing={!selected.automatic && <IconButton name="create-outline" label="编辑分类" onPress={() => openEditor(selected)} />} />
         <Text style={[styles.meta, categoryUiStyles.categoryDetailCount, isDark && styles.textMutedDark]}>{selectedSeries.length} 部作品</Text>
       </View>}
-      renderItem={({ item, index }) => <View style={{ width: grid.cardWidth, marginBottom: grid.gutter }}><BookCard title={item.title} author={item.author} coverUri={item.coverUri} index={index} onPress={() => openSeries(item)} footer={<SeriesProgress series={item} compact />} /></View>}
-      ListEmptyComponent={<View style={styles.empty}><Ionicons name="albums-outline" size={36} color="#B2ADB7" /><Text style={[styles.meta, isDark && styles.textMutedDark]}>这个分类还没有作品</Text></View>}
+      renderItem={({ item, index }) => <View style={{ width: grid.cardWidth }}><SeriesCard series={item} index={index} onPress={() => openSeries(item)} /></View>}
+      ListEmptyComponent={<EmptyState icon="albums-outline" title="这个分类还没有作品" />}
     />
-  </SafeAreaView>;
+  </Screen> : null;
 
   const hasAnyCategory = categories.length > 0 || automaticCategories.length > 0;
 
-  return <SafeAreaView style={[styles.safe, isDark && styles.safeDark]}>
-    <ScrollView contentContainerStyle={[styles.page, isDark && styles.pageDark]}>
-      <View style={[styles.header, pageLayoutStyles.pageHeader, categoryUiStyles.centeredHeader]}>
-        <Text style={[styles.title, isDark && styles.textPrimaryDark]}>分类</Text>
-        <View style={layoutStyles.libraryHeaderActions}><View style={pageLayoutStyles.headerSpacer} /></View>
-      </View>
+  return <Screen safeArea={false}>
+    {selected ? selectedContent : <ScrollView contentContainerStyle={[styles.page, isDark && styles.pageDark, { paddingHorizontal: grid.pageInset }]}>
+      <ScreenHeader title="分类" />
 
       <View style={[categoryStyles.categoryOverview, isDark && categoryStyles.categoryOverviewDark]} accessibilityRole="summary">
         <View style={categoryStyles.categoryOverviewItem}>
@@ -186,38 +186,28 @@ export function CategoriesScreen({ series, openSeries }: Props) {
         </View>
       </View>
 
-      {categories.length > 0 && <Text style={[styles.sectionTitle, categoryUiStyles.sectionHeading, isDark && styles.textPrimaryDark]}>自定义分类</Text>}
+      {categories.length > 0 && <SectionHeader title="自定义分类" />}
       {categories.map(renderCustomCategory)}
 
-      {automaticAuthors.length > 0 && <Text style={[styles.settingSection, categoryUiStyles.automaticGroupHeading, isDark && uiStyles.settingSectionDark]}>作者</Text>}
+      {automaticAuthors.length > 0 && <SectionHeader title="作者" />}
       {automaticAuthors.length > 0 && <View style={categoryStyles.automaticCategoryGrid}>{automaticAuthors.map(category => <AutomaticCategoryTile key={category.id} category={category} isDark={isDark} onPress={() => setSelected(category)} />)}</View>}
-      {automaticTags.length > 0 && <Text style={[styles.settingSection, categoryUiStyles.automaticTagHeading, isDark && uiStyles.settingSectionDark]}>标签</Text>}
+      {automaticTags.length > 0 && <SectionHeader title="标签" />}
       {automaticTags.length > 0 && <View style={categoryStyles.automaticCategoryGrid}>{automaticTags.map(category => <AutomaticCategoryTile key={category.id} category={category} isDark={isDark} onPress={() => setSelected(category)} />)}</View>}
 
-      {!hasAnyCategory && <View style={styles.empty}>
-        <Ionicons name="albums-outline" size={38} color="#B2ADB7" />
-        <Text style={[styles.rowTitle, isDark && styles.textPrimaryDark]}>还没有分类</Text>
-        <Text style={[styles.meta, isDark && styles.textMutedDark]}>创建一个分类，或先给作品添加作者和 tag</Text>
-      </View>}
+      {!hasAnyCategory && <EmptyState icon="albums-outline" title="还没有分类" description="创建分类，或先给作品添加作者和标签。" />}
 
-      <PressableScale accessibilityRole="button" accessibilityLabel="添加分类" onPress={() => openEditor()} style={[styles.dashedButton, { borderStyle: 'solid', borderWidth: 0, backgroundColor: isDark ? '#30274A' : '#EEE9FF', height: 54, borderRadius: 16, marginTop: hasAnyCategory ? 18 : 6 }]}>
-        <Ionicons name="add-circle-outline" size={21} color={isDark ? '#C8B9FF' : '#7257E7'} />
-        <Text style={[styles.dashedText, isDark && styles.textPrimaryDark]}>添加分类</Text>
-      </PressableScale>
-    </ScrollView>
+      <Button label="添加分类" variant="secondary" icon="add-circle-outline" onPress={() => openEditor()} style={{ marginTop: 16 }} />
+    </ScrollView>}
 
     <BottomSheet visible={editor !== undefined} onClose={() => setEditor(undefined)} maxHeight="82%">
-      <View style={styles.sheetHeading}>
-        <Text style={[styles.sheetTitle, isDark && styles.textPrimaryDark]}>{editor?.id ? '编辑分类' : '新建分类'}</Text>
-        <PressableScale disabled={saving} onPress={save} style={{ minWidth: 44, minHeight: 44, alignItems: 'flex-end', justifyContent: 'center' }}>
-          <Text style={styles.done}>{saving ? '保存中…' : '保存'}</Text>
-        </PressableScale>
-      </View>
-      <Text style={[styles.settingSection, isDark && uiStyles.settingSectionDark]}>分类名称</Text>
-      <TextInput value={name} onChangeText={setName} placeholder="例如：正在阅读" placeholderTextColor={isDark ? '#B8B1C2' : '#8A8691'} style={[styles.input, isDark && uiStyles.inputDark]} />
-      <Text style={[styles.settingSection, isDark && uiStyles.settingSectionDark]}>绑定 tag（命中任意一个即可）</Text>
+      <ScrollView keyboardShouldPersistTaps="handled" style={{ flexShrink: 1 }}>
+      <ScreenHeader title={editor?.id ? '编辑分类' : '新建分类'} trailing={<IconButton name="close" label="关闭分类编辑" onPress={() => setEditor(undefined)} />} />
+      <TextField label="分类名称" value={name} onChangeText={setName} placeholder="例如：正在阅读" />
+      <Text style={[styles.settingSection, isDark && uiStyles.settingSectionDark]}>绑定标签（命中任意一个即可）</Text>
       <View style={styles.tagList}>{tags.map(tag => <TagChip key={tag.id} tag={tag} selected={selectedTagIds.includes(tag.id)} onPress={() => setSelectedTagIds(current => current.includes(tag.id) ? current.filter(id => id !== tag.id) : [...current, tag.id])} />)}</View>
-      {tags.length === 0 && <Text style={[styles.meta, isDark && styles.textMutedDark]}>先在作品详情中添加 tag</Text>}
+      {tags.length === 0 && <Text style={[styles.meta, isDark && styles.textMutedDark]}>先在作品详情中添加标签</Text>}
+      <Button label="保存分类" loading={saving} disabled={!name.trim()} onPress={save} style={{ marginTop: 16 }} />
+      </ScrollView>
     </BottomSheet>
-  </SafeAreaView>;
+  </Screen>;
 }

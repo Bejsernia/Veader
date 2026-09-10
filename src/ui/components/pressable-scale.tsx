@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { Pressable, PressableProps, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
-import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import React,{ useState } from 'react';
+import { Pressable,PressableProps,StyleProp,StyleSheet,View,ViewStyle } from 'react-native';
+import Animated,{ useAnimatedStyle,useSharedValue,withSpring } from 'react-native-reanimated';
 import { motionSpring } from '../motion';
 import { useTheme } from '../theme';
 

@@ -1,6 +1,6 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { AccessibilityInfo, TextStyle, useColorScheme } from 'react-native';
-import { loadThemeMode, saveThemeMode, ThemeMode } from '../preferences';
+import React,{ createContext,useContext,useEffect,useMemo,useState } from 'react';
+import { AccessibilityInfo,TextStyle,useColorScheme } from 'react-native';
+import { ThemeMode,loadThemeMode,saveThemeMode } from '../preferences';
 
 export type ThemeTokens = {
   colors: {
@@ -136,3 +136,9 @@ export function useTheme() {
   if (!value) throw new Error('useTheme must be used inside ThemeProvider');
   return value;
 }
+
+// Reading controls follow the canvas preference; sheets follow the app theme.
+export const readerAppearance = {
+  dark: { canvas: '#09090B', overlay: 'rgba(8,8,10,0.94)', text: '#FFFFFF', muted: '#B7AEC5', track: '#55515B', accent: '#A78BFA' },
+  light: { canvas: '#FFFFFF', overlay: 'rgba(248,247,250,0.96)', text: '#211D29', muted: '#716A7C', track: '#D0CBD8', accent: '#7052E8' },
+} as const;

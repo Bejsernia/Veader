@@ -1,6 +1,6 @@
-import React from 'react';
-import { Pressable, StyleProp, Text, TextStyle, View, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import React from 'react';
+import { Pressable,StyleProp,Text,TextStyle,View,ViewStyle } from 'react-native';
 import { useTheme } from '../theme';
 
 type Props = { icon?: React.ReactNode; title: string; description?: string; value?: string; control?: React.ReactNode; onPress?: () => void; style?: StyleProp<ViewStyle>; titleStyle?: StyleProp<TextStyle> };

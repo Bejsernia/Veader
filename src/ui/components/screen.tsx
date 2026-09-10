@@ -1,8 +1,8 @@
 import React from 'react';
-import { ScrollView, ScrollViewProps, StyleProp, View, ViewStyle, useWindowDimensions } from 'react-native';
+import { ScrollView,ScrollViewProps,StyleProp,View,ViewStyle,useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useTheme } from '../theme';
 import { getGridLayout } from '../layout';
+import { useTheme } from '../theme';
 
 /** Standalone pages own safe areas; tab content passes safeArea=false. */
 export function Screen({ children, scroll = false, safeArea = true, style, contentStyle, scrollProps }: {

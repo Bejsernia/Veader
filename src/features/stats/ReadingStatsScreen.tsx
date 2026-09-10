@@ -1,24 +1,25 @@
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, Text, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import type { ReadingStatsRange, ReadingStatsSummary } from '../../domain/models';
+import React,{ useEffect,useState } from 'react';
+import { ActivityIndicator,ScrollView,Text,View,useWindowDimensions } from 'react-native';
 import { statsRepository } from '../../data/stats-repository';
-import { PressableScale } from '../../ui/components/pressable-scale';
+import type { ReadingStatsRange,ReadingStatsSummary } from '../../domain/models';
+import { Button } from '../../ui/components/button';
+import { ProgressBar } from '../../ui/components/progress-bar';
+import { Screen } from '../../ui/components/screen';
+import { ScreenHeader } from '../../ui/components/screen-header';
+import { SegmentedControl } from '../../ui/components/segmented-control';
+import { useScreenStyles } from '../../ui/screen-styles';
 import { useTheme } from '../../ui/theme';
-import { styles, layoutStyles, pageLayoutStyles, statsChartAdjustments, statsChartStyles, uiStyles } from '../../ui/legacy-styles';
-import { IconButton } from '../shared/library-ui';
+import { formatReadingDuration } from '../shared/library-ui';
 import { normalizeDailyRows } from './chart-utils';
 
 const DAILY_PLOT_HEIGHT = 128;
 const DAILY_X_AXIS_HEIGHT = 24;
 
-function duration(value: number) {
-  const minutes = Math.round(value / 60000);
-  return minutes >= 60 ? `${Math.floor(minutes / 60)}小时 ${minutes % 60}分` : `${minutes}分钟`;
-}
+const duration = formatReadingDuration;
 
 function BarList({ rows, isDark, formatValue = duration }: { rows: Array<{ name: string; value: number; detail: string }>; isDark: boolean; formatValue?: (value: number) => string }) {
+  const { styles } = useScreenStyles();
   const max = Math.max(1, ...rows.map(row => row.value));
   return <View style={{ gap: 13 }}>
     {rows.length ? rows.map(row => <View key={row.name}>
@@ -26,9 +27,7 @@ function BarList({ rows, isDark, formatValue = duration }: { rows: Array<{ name:
         <Text numberOfLines={1} style={[styles.rowTitle, { flex: 1 }, isDark && styles.textPrimaryDark]}>{row.name}</Text>
         <Text style={[styles.meta, isDark && styles.textMutedDark]}>{formatValue(row.value)}</Text>
       </View>
-      <View style={{ height: 7, borderRadius: 4, overflow: 'hidden', backgroundColor: isDark ? '#3A3443' : '#E3E0E7', marginTop: 5 }}>
-        <View style={{ height: '100%', width: `${Math.max(3, row.value / max * 100)}%`, borderRadius: 4, backgroundColor: '#7257E7' }} />
-      </View>
+      <ProgressBar value={row.value / max} height={7} />
       <Text style={[styles.meta, { fontSize: 11 }, isDark && styles.textMutedDark]}>{row.detail}</Text>
     </View>) : <Text style={[styles.meta, isDark && styles.textMutedDark]}>暂无数据</Text>}
   </View>;
@@ -69,6 +68,7 @@ function displayDateLabel(label: string, range: ReadingStatsRange) {
 }
 
 function DailyBars({ summary, isDark }: { summary: ReadingStatsSummary; isDark: boolean }) {
+  const { styles, statsChartStyles, statsChartAdjustments } = useScreenStyles();
   const { width } = useWindowDimensions();
   const rows = normalizeDailyRows(summary);
   const scale = axisScale(rows);
@@ -116,42 +116,35 @@ function DailyBars({ summary, isDark }: { summary: ReadingStatsSummary; isDark: 
 }
 
 export function ReadingStatsScreen({ back }: { back: () => void }) {
-  const { isDark } = useTheme();
+  const { styles, uiStyles } = useScreenStyles();
+  const { isDark, tokens } = useTheme();
   const [range, setRange] = useState<ReadingStatsRange>('7d');
   const [summary, setSummary] = useState<ReadingStatsSummary>();
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
-    void statsRepository.getSummary(range).then(value => { if (active) setSummary(value); }).catch(console.warn).finally(() => active && setLoading(false));
+    setLoading(true); setError('');
+    void statsRepository.getSummary(range).then(value => { if (active) setSummary(value); }).catch(reason => { if (active) setError(String(reason)); }).finally(() => active && setLoading(false));
     return () => { active = false; };
-  }, [range]);
+  }, [range, attempt]);
 
-  return <SafeAreaView style={[styles.safe, isDark && styles.safeDark]}>
-    <ScrollView contentContainerStyle={[styles.page, isDark && styles.pageDark]}>
-      <View style={[styles.header, layoutStyles.subpageHeader]}>
-        <IconButton name="chevron-back" label="返回最近阅读" onPress={back} />
-        <Text style={[styles.navTitle, isDark && styles.textPrimaryDark]}>阅读统计</Text>
-        <View style={pageLayoutStyles.headerSpacer} />
-      </View>
-      <View style={[styles.segment, isDark && uiStyles.segmentDark]}>
-        {(['7d', '30d', 'all'] as ReadingStatsRange[]).map(value => <PressableScale key={value} onPress={() => setRange(value)} style={[styles.segmentItem, range === value && styles.segmentActive, isDark && range === value && uiStyles.segmentActiveDark]}>
-          <Text style={[styles.segmentText, range === value && styles.segmentTextActive, isDark && value !== range && uiStyles.segmentTextDark]}>{value === '7d' ? '7天' : value === '30d' ? '30天' : '全部'}</Text>
-        </PressableScale>)}
-      </View>
-      {loading || !summary ? <View style={uiStyles.loadingState}><ActivityIndicator color="#7257E7" /><Text style={[styles.meta, isDark && styles.textMutedDark]}>正在计算阅读数据…</Text></View> : <>
+  return <Screen scroll>
+      <ScreenHeader title="阅读统计" back={back} />
+      <SegmentedControl label="统计范围" value={range} onChange={setRange} options={[{ value: '7d', label: '7天' }, { value: '30d', label: '30天' }, { value: 'all', label: '全部' }]} />
+      {error ? <View><Text style={{ color: tokens.colors.danger }}>{error}</Text><Button label="重新加载统计" onPress={() => setAttempt(n => n + 1)} /></View> : loading || !summary ? <View style={uiStyles.loadingState}><ActivityIndicator color={tokens.colors.primary} /><Text style={[styles.meta, isDark && styles.textMutedDark]}>正在计算阅读数据…</Text></View> : <>
         <View style={styles.statsOverviewGrid}>
-          <View style={[styles.statsOverviewCard, isDark && styles.cardDark]}><Ionicons name="time-outline" size={20} color="#7257E7" /><Text style={[styles.statsOverviewValue, isDark && styles.textPrimaryDark]}>{duration(summary.totalDurationMs)}</Text><Text style={[styles.meta, isDark && styles.textMutedDark]}>阅读时长</Text></View>
-          <View style={[styles.statsOverviewCard, isDark && styles.cardDark]}><Ionicons name="book-outline" size={20} color="#0F9F83" /><Text style={[styles.statsOverviewValue, isDark && styles.textPrimaryDark]}>{summary.totalPages}</Text><Text style={[styles.meta, isDark && styles.textMutedDark]}>阅读页数</Text></View>
-          <View style={[styles.statsOverviewCard, isDark && styles.cardDark]}><Ionicons name="library-outline" size={20} color="#A855F7" /><Text style={[styles.statsOverviewValue, isDark && styles.textPrimaryDark]}>{summary.bookCount}</Text><Text style={[styles.meta, isDark && styles.textMutedDark]}>阅读作品</Text></View>
-          <View style={[styles.statsOverviewCard, isDark && styles.cardDark]}><Ionicons name="checkmark-circle-outline" size={20} color="#C56B1C" /><Text style={[styles.statsOverviewValue, isDark && styles.textPrimaryDark]}>{summary.completedChapterCount}</Text><Text style={[styles.meta, isDark && styles.textMutedDark]}>完成章节</Text></View>
+          <View style={[styles.statsOverviewCard, isDark && styles.cardDark]}><Ionicons name="time-outline" size={20} color={tokens.colors.primary} /><Text style={[styles.statsOverviewValue, isDark && styles.textPrimaryDark]}>{duration(summary.totalDurationMs)}</Text><Text style={[styles.meta, isDark && styles.textMutedDark]}>阅读时长</Text></View>
+          <View style={[styles.statsOverviewCard, isDark && styles.cardDark]}><Ionicons name="book-outline" size={20} color={tokens.colors.secondary} /><Text style={[styles.statsOverviewValue, isDark && styles.textPrimaryDark]}>{summary.totalPages}</Text><Text style={[styles.meta, isDark && styles.textMutedDark]}>阅读页数</Text></View>
+          <View style={[styles.statsOverviewCard, isDark && styles.cardDark]}><Ionicons name="library-outline" size={20} color={tokens.colors.primary} /><Text style={[styles.statsOverviewValue, isDark && styles.textPrimaryDark]}>{summary.bookCount}</Text><Text style={[styles.meta, isDark && styles.textMutedDark]}>阅读作品</Text></View>
+          <View style={[styles.statsOverviewCard, isDark && styles.cardDark]}><Ionicons name="checkmark-circle-outline" size={20} color={tokens.colors.accent} /><Text style={[styles.statsOverviewValue, isDark && styles.textPrimaryDark]}>{summary.completedChapterCount}</Text><Text style={[styles.meta, isDark && styles.textMutedDark]}>完成章节</Text></View>
         </View>
         <View style={[styles.statsPanel, isDark && styles.cardDark]}><Text style={[styles.sectionTitle, isDark && styles.textPrimaryDark]}>每日阅读时长</Text><DailyBars summary={summary} isDark={isDark} /></View>
         <View style={[styles.statsPanel, isDark && styles.cardDark]}><Text style={[styles.sectionTitle, isDark && styles.textPrimaryDark]}>按作品</Text><BarList isDark={isDark} rows={summary.byBook.map(row => ({ name: row.title, value: row.durationMs, detail: `${row.pages} 页 · ${Math.round(row.progress * 100)}%`, }))} /></View>
-        <View style={[styles.statsPanel, isDark && styles.cardDark]}><Text style={[styles.sectionTitle, isDark && styles.textPrimaryDark]}>按 tag</Text><BarList isDark={isDark} rows={summary.byTag.map(row => ({ name: row.name, value: row.durationMs, detail: `${row.pages} 页`, }))} /></View>
+        <View style={[styles.statsPanel, isDark && styles.cardDark]}><Text style={[styles.sectionTitle, isDark && styles.textPrimaryDark]}>按标签</Text><BarList isDark={isDark} rows={summary.byTag.map(row => ({ name: row.name, value: row.durationMs, detail: `${row.pages} 页`, }))} /></View>
         <View style={[styles.statsPanel, isDark && styles.cardDark]}><Text style={[styles.sectionTitle, isDark && styles.textPrimaryDark]}>按作者</Text><BarList isDark={isDark} rows={summary.byAuthor.map(row => ({ name: row.name, value: row.durationMs, detail: `${row.pages} 页`, }))} /></View>
       </>}
-    </ScrollView>
-  </SafeAreaView>;
+  </Screen>;
 }

@@ -1,10 +1,10 @@
 import React from 'react';
-import { DimensionValue, KeyboardAvoidingView, Modal, Platform, Pressable, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
+import { DimensionValue,KeyboardAvoidingView,Modal,Platform,Pressable,StyleProp,StyleSheet,View,ViewStyle } from 'react-native';
+import { Gesture,GestureDetector,GestureHandlerRootView } from 'react-native-gesture-handler';
+import Animated,{ runOnJS,useAnimatedStyle,useSharedValue,withSpring } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
-import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
-import { useTheme } from '../theme';
 import { motionSpring } from '../motion';
+import { useTheme } from '../theme';
 
 type Props = { visible: boolean; onClose: () => void; children: React.ReactNode; style?: StyleProp<ViewStyle>; maxHeight?: DimensionValue };
 /** One modal boundary for menus, reader controls and keyboard-driven forms. */

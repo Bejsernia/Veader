@@ -1,36 +1,65 @@
-import React, { useEffect, useState } from 'react';
-import { Alert, BackHandler, FlatList, Image, Pressable, SectionList, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import type { LibrarySeries, LibraryTag, ReadingStatsSummary, StoredChapter } from '../../domain/models';
-import { getGridLayout } from '../../ui/layout';
-import { BookCard } from '../../ui/components/book-card';
-import { PressableScale } from '../../ui/components/pressable-scale';
-import { BottomSheet } from '../../ui/components/bottom-sheet';
+import React,{ useEffect,useState } from 'react';
+import { Alert,BackHandler,FlatList,SectionList,Text,View,useWindowDimensions } from 'react-native';
 import { tagRepository } from '../../data/tag-repository';
+import type { LibrarySeries,LibraryTag,ReadingStatsSummary,StoredChapter } from '../../domain/models';
+import { BookCover } from '../../ui/components/book-cover';
+import { BottomSheet } from '../../ui/components/bottom-sheet';
+import { Button } from '../../ui/components/button';
+import { ChapterRow } from '../../ui/components/chapter-row';
+import { EmptyState } from '../../ui/components/empty-state';
+import { PressableScale } from '../../ui/components/pressable-scale';
+import { Screen } from '../../ui/components/screen';
+import { ScreenHeader } from '../../ui/components/screen-header';
+import { SectionHeader } from '../../ui/components/section-header';
+import { SettingsGroup } from '../../ui/components/settings-group';
+import { SettingsRow } from '../../ui/components/settings-row';
+import { TagChip } from '../../ui/components/tag-chip';
+import { TextField } from '../../ui/components/text-field';
+import { getGridLayout } from '../../ui/layout';
+import { useScreenStyles } from '../../ui/screen-styles';
 import { useTheme } from '../../ui/theme';
-import { categoryUiStyles, styles, layoutStyles, pageLayoutStyles, uiStyles } from '../../ui/legacy-styles';
-import { compactAuthor, IconButton, Progress, SeriesProgress } from '../shared/library-ui';
+import { IconButton,Progress,SeriesCard,SeriesProgress,compactAuthor,formatReadingDuration } from '../shared/library-ui';
 import { normalizeDailyRows } from '../stats/chart-utils';
 
 function SeriesLibrary({ series, importing, refreshLibraries, openSeries, continueSeries, openSources }: { series: LibrarySeries[]; importing: boolean; refreshLibraries: () => void; openSeries: (value: LibrarySeries) => void; continueSeries: (value: LibrarySeries) => void; openSources: () => void }) {
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
-  const { isDark } = useTheme();
-  const { width: viewportWidth } = useWindowDimensions();
-  const grid = getGridLayout(viewportWidth);
-  const visible = series.filter(item => `${item.title} ${item.author} ${item.tags.map(tag => tag.name).join(' ')} ${item.chapterSearchText}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const { tokens } = useTheme();
+  const { width } = useWindowDimensions();
+  const grid = getGridLayout(width);
+  const visible = series.filter(item => [item.title, item.author, item.tags.map(tag => tag.name).join(' '), item.chapterSearchText].join(' ').toLowerCase().includes(query.trim().toLowerCase()));
   const featured = series.find(item => item.currentChapterId !== null);
-  useEffect(() => { if (!searching) return; const subscription = BackHandler.addEventListener('hardwareBackPress', () => { setSearching(false); setQuery(''); return true; }); return () => subscription.remove(); }, [searching]);
-  const header = <View><View style={[styles.header, pageLayoutStyles.pageHeader, categoryUiStyles.centeredHeader]}><Text style={[styles.title, pageLayoutStyles.pageTitle, isDark && styles.textPrimaryDark]}>我的书架</Text><IconButton name={searching ? 'close' : 'search'} label={searching ? '关闭搜索' : '搜索作品'} onPress={() => { setSearching(value => !value); if (searching) setQuery(''); }} /></View>{searching && <View style={[styles.search, isDark && uiStyles.searchDark]}><Ionicons name="search" size={18} color={isDark ? '#C4BBCF' : '#8A8691'} /><TextInput value={query} onChangeText={setQuery} autoFocus placeholder="搜索作品名或作者" placeholderTextColor={isDark ? '#B8B1C2' : '#8A8691'} style={[styles.searchInput, isDark && uiStyles.searchInputDark]} /></View>}{!searching && featured && <Pressable accessibilityRole="button" style={[styles.continueCard, layoutStyles.continueCardCompact]} onPress={() => continueSeries(featured)}>{featured.coverUri ? <Image source={{ uri: featured.coverUri }} style={[styles.continueCover, layoutStyles.continueCoverCompact]} /> : <View style={[styles.continueFormat, layoutStyles.continueCoverCompact]}><Text style={styles.formatText}>漫画</Text></View>}<View style={[styles.continueBody, layoutStyles.continueBodyCompact]}><View style={layoutStyles.continueTopRow}><Text numberOfLines={1} style={[styles.continueTitle, layoutStyles.continueTitleTop]}>{featured.title}</Text><View style={[styles.pill, layoutStyles.pillRight]}><Text style={styles.pillText}>继续阅读</Text></View></View><View style={layoutStyles.continueAuthorSlot}>{featured.author && <Text numberOfLines={1} style={layoutStyles.continueAuthor}>{compactAuthor(featured.author)}</Text>}</View><SeriesProgress series={featured} inverse compact /></View></Pressable>}<View style={[styles.sectionHeader, pageLayoutStyles.pageHeader, categoryUiStyles.centeredHeader]}>{searching ? <View><Text numberOfLines={1} style={[styles.sectionTitle, isDark && styles.textPrimaryDark]}>{query.trim() ? `搜索“${query.trim()}”` : '搜索作品'}</Text><Text style={[styles.meta, isDark && styles.textMutedDark]}>{visible.length} 部</Text></View> : <><Text style={[styles.sectionTitle, isDark && styles.textPrimaryDark]}>全部作品 · {series.length}</Text><View style={layoutStyles.libraryHeaderActions}><Pressable accessibilityRole="button" accessibilityLabel="刷新漫画源" onPress={refreshLibraries} style={({ pressed }) => [styles.folderButton, isDark && uiStyles.folderButtonDark, pressed && styles.pressed]}><Ionicons name={importing ? 'sync' : 'refresh'} size={18} color={isDark ? '#B9A5FF' : '#7257E7'} /></Pressable><Pressable accessibilityRole="button" accessibilityLabel="打开漫画源设置" onPress={openSources} style={({ pressed }) => [styles.folderButton, isDark && uiStyles.folderButtonDark, pressed && styles.pressed]}><Ionicons name="folder-open" size={18} color={isDark ? '#B9A5FF' : '#7257E7'} /></Pressable></View></>}</View></View>;
-  const empty = series.length === 0 ? <View style={[styles.emptyLibrary, isDark && styles.cardDark]}><View style={styles.emptyLibraryIcon}><Ionicons name="library-outline" size={38} color="#7257E7" /></View><Text style={[styles.emptyTitle, isDark && styles.textPrimaryDark]}>尚未设置漫画库</Text><Text style={[styles.emptyDescription, isDark && styles.textMutedDark]}>选择一个漫画源；其中每个一级子文件夹会作为一本作品，文件夹内的 EPUB、MOBI、PDF 会按章节整理。</Text><Pressable accessibilityRole="button" onPress={openSources} style={styles.primaryButton}><Text style={styles.primaryText}>添加漫画源</Text></Pressable></View> : <View style={styles.empty}><Text style={[styles.meta, isDark && styles.textMutedDark]}>没有匹配的作品</Text></View>;
-  return <FlatList key={grid.columns} data={visible} numColumns={grid.columns} keyExtractor={item => String(item.id)} contentInsetAdjustmentBehavior="automatic" showsVerticalScrollIndicator={false} contentContainerStyle={[styles.page, isDark && styles.pageDark, { paddingHorizontal: grid.pageInset }]} columnWrapperStyle={{ gap: grid.gutter }} ListHeaderComponent={header} ListEmptyComponent={empty} renderItem={({ item, index }) => <View style={{ width: grid.cardWidth, marginBottom: grid.gutter }}><BookCard title={item.title} author={item.author ? compactAuthor(item.author) : undefined} coverUri={item.coverUri} index={index} onPress={() => openSeries(item)} footer={<SeriesProgress series={item} compact />} /></View>} />;
+  useEffect(() => { if (!searching) return; const sub = BackHandler.addEventListener('hardwareBackPress', () => { setSearching(false); setQuery(''); return true; }); return () => sub.remove(); }, [searching]);
+  return <FlatList key={grid.columns} data={visible} numColumns={grid.columns} keyExtractor={item => String(item.id)} showsVerticalScrollIndicator={false}
+    contentContainerStyle={{ padding: 16, paddingHorizontal: grid.pageInset }} columnWrapperStyle={{ gap: grid.gutter }}
+    ListHeaderComponent={<View>
+      <ScreenHeader title="我的书架" trailing={<IconButton name={searching ? 'close' : 'search'} label={searching ? '关闭搜索' : '搜索作品'} onPress={() => { setSearching(!searching); setQuery(''); }} />} />
+      {searching && <TextField label="搜索作品" value={query} onChangeText={setQuery} autoFocus placeholder="作品名、作者或标签" />}
+      {!searching && featured && <PressableScale accessibilityRole="button" accessibilityLabel={'继续阅读 ' + featured.title} onPress={() => continueSeries(featured)} style={{ flexDirection: 'row', alignItems: 'center', padding: 16, gap: 16, borderRadius: tokens.radius.lg, backgroundColor: tokens.colors.selectedContainer }}>
+        <BookCover uri={featured.coverUri} style={{ width: 86 }} />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={[tokens.typography.caption, { color: tokens.colors.onSelectedContainer, marginBottom: 4 }]}>继续阅读</Text>
+          <Text numberOfLines={2} style={[tokens.typography.sectionTitle, { color: tokens.colors.onSelectedContainer }]}>{featured.title}</Text>
+          {!!featured.author && <Text numberOfLines={1} style={[tokens.typography.caption, { color: tokens.colors.onSelectedContainer }]}>{compactAuthor(featured.author)}</Text>}
+          <SeriesProgress series={featured} inverse compact />
+        </View>
+      </PressableScale>}
+      <SectionHeader title={searching ? '搜索结果 · ' + visible.length : '全部作品 · ' + series.length} trailing={!searching && <View style={{ flexDirection: 'row' }}>
+        <IconButton name={importing ? 'sync' : 'refresh'} label="刷新漫画源" onPress={importing ? undefined : refreshLibraries} />
+        <IconButton name="folder-open-outline" label="打开漫画源设置" onPress={openSources} />
+      </View>} />
+    </View>}
+    ListEmptyComponent={series.length === 0 ? <EmptyState title="尚未设置漫画库" description="选择漫画源，每个一级子文件夹会作为一本作品，其中的文件按章节整理。" actionLabel="添加漫画源" onAction={openSources} /> : <EmptyState icon="search-outline" title="没有匹配的作品" description="试试其他作品名、作者或标签。" />}
+    renderItem={({ item, index }) => <View style={{ width: grid.cardWidth }}><SeriesCard series={item} index={index} onPress={() => openSeries(item)} /></View>}
+  />;
 }
 
 function SeriesDetail({ series, chapters: seriesChapters, back, openChapter, continueReading, uploadCover, onSeriesChanged }: { series: LibrarySeries; chapters: StoredChapter[]; back: () => void; openChapter: (chapter: StoredChapter) => void; continueReading: () => void; uploadCover: () => void; onSeriesChanged?: () => void }) {
+  const { styles, layoutStyles } = useScreenStyles();
   const chapterIndex = series.currentChapterId === null ? -1 : Math.max(0, seriesChapters.findIndex(item => item.id === series.currentChapterId));
   const chapterProgress = series.currentChapterId === null ? 0 : (chapterIndex + 1) / Math.max(1, seriesChapters.length);
-  const { isDark } = useTheme();
+  const { isDark, tokens } = useTheme();
   const hasHistory = series.currentChapterId !== null;
   const [seriesActions, setSeriesActions] = useState(false);
   const [tagSheet, setTagSheet] = useState<'author' | 'general'>();
@@ -52,13 +81,7 @@ function SeriesDetail({ series, chapters: seriesChapters, back, openChapter, con
     catch (error) { Alert.alert('删除失败', error instanceof Error ? error.message : String(error)); }
   };
 
-  const renderTag = (tag: LibraryTag) => <View key={tag.id} style={styles.tagChip}>
-    <Ionicons name={tag.kind === 'author' ? 'person-outline' : 'pricetag-outline'} size={13} color={isDark ? '#C8B9FF' : '#7257E7'} />
-    <Text numberOfLines={1} style={[styles.tagChipText, isDark && styles.textMutedDark]}>{tag.name}</Text>
-    {tag.sources.includes('metadata') && !tag.sources.includes('manual')
-      ? <Ionicons name="lock-closed-outline" size={12} color={isDark ? '#B8B1C2' : '#8A8691'} />
-      : <Pressable accessibilityRole="button" accessibilityLabel={`删除标签${tag.name}`} onPress={() => removeTag(tag)}><Ionicons name="close-circle" size={15} color={isDark ? '#F5A9B7' : '#C84459'} /></Pressable>}
-  </View>;
+  const renderTag = (tag: LibraryTag) => <TagChip key={tag.id} label={tag.name} author={tag.kind === 'author'} locked={!tag.sources.includes('manual')} onRemove={tag.sources.includes('manual') ? () => { void removeTag(tag); } : undefined} />;
 
   const header = <View>
     <View style={[styles.detailTop, layoutStyles.detailTopAligned]}>
@@ -66,81 +89,88 @@ function SeriesDetail({ series, chapters: seriesChapters, back, openChapter, con
       <IconButton name="settings-outline" label="作品设置" onPress={() => setSeriesActions(true)} />
     </View>
     <View style={styles.hero}>
-      {series.coverUri ? <Image source={{ uri: series.coverUri }} style={styles.detailCover} /> : <View style={[styles.detailCover, layoutStyles.formatPlaceholder]}><Ionicons name="book" size={38} color="#fff" /></View>}
+      <BookCover uri={series.coverUri} style={{ width: 112 }} />
       <View style={styles.heroBody}>
         <Text style={[styles.detailTitle, isDark && styles.textPrimaryDark]}>{series.title}</Text>
-        <View style={layoutStyles.detailAuthorSlot}>{series.author && <Text numberOfLines={1} style={[{ color: '#88838E', fontSize: 12, marginTop: -2, marginBottom: 5 }, isDark && styles.textMutedDark]}>{compactAuthor(series.author)}</Text>}</View>
+        <View style={layoutStyles.detailAuthorSlot}>{series.author && <Text numberOfLines={1} style={[{ color: tokens.colors.mutedText, fontSize: 12, marginTop: -2, marginBottom: 5 }, isDark && styles.textMutedDark]}>{compactAuthor(series.author)}</Text>}</View>
         <Text style={[styles.heroProgress, isDark && styles.textMutedDark]}>章节进度 {chapterIndex + 1} / {seriesChapters.length}</Text>
-        <Progress value={chapterProgress} color="#0F9F91" />
+        <Progress value={chapterProgress} color={tokens.colors.secondary} />
         <Text style={[styles.heroProgress, isDark && styles.textMutedDark]}>当前章节 {Math.round(series.progress * 100)}%</Text>
-        <Progress value={series.progress} color="#A855F7" />
+        <Progress value={series.progress} color={tokens.colors.primary} />
       </View>
     </View>
     <View style={styles.tagEditor}>
       <View style={styles.tagList}>{authorTags.map(renderTag)}{tags.filter(tag => tag.kind === 'general').map(renderTag)}</View>
     </View>
-    <Pressable accessibilityRole="button" accessibilityLabel={hasHistory ? '继续阅读' : '开始阅读'} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]} onPress={continueReading}>
-      <Ionicons name="book" size={20} color="#fff" /><Text style={styles.primaryText}>{hasHistory ? '继续阅读' : '开始阅读'}</Text>
-    </Pressable>
-    <View style={styles.sectionHeader}><Text style={[styles.sectionTitle, isDark && styles.textPrimaryDark]}>目录</Text><Text style={[styles.meta, isDark && styles.textMutedDark]}>共 {seriesChapters.length} 章</Text></View>
+    <Button label={hasHistory ? '继续阅读' : '开始阅读'} icon="book-outline" onPress={continueReading} style={{ marginTop: 24 }} />
+    <SectionHeader title="目录" trailing={<Text style={{ color: tokens.colors.mutedText }}>共 {seriesChapters.length} 章</Text>} />
   </View>;
 
-  return <SafeAreaView style={[styles.safe, isDark && styles.safeDark]}>
+  return <Screen>
     <FlatList
       data={seriesChapters}
       keyExtractor={chapter => String(chapter.id)}
       contentInsetAdjustmentBehavior="automatic"
       contentContainerStyle={[styles.detailPage, isDark && styles.pageDark]}
       ListHeaderComponent={header}
-      ListEmptyComponent={<View style={styles.empty}><Text style={[styles.meta, isDark && styles.textMutedDark]}>尚未找到章节</Text></View>}
-      renderItem={({ item: chapter }) => <Pressable accessibilityRole="button" accessibilityLabel={`打开${chapter.chapterTitle}`} style={({ pressed }) => [styles.chapter, isDark && styles.chapterDark, pressed && styles.pressed]} onPress={() => openChapter(chapter)}>
-        <View style={[styles.chapterNumber, isDark && uiStyles.chapterNumberDark]}><Text style={[styles.chapterNumberText, isDark && uiStyles.chapterNumberTextDark]}>{chapter.chapterNumber}</Text></View>
-        <View style={styles.flex}><Text numberOfLines={1} style={[styles.rowTitle, isDark && styles.textPrimaryDark]}>{chapter.chapterTitle}</Text><Text style={[styles.meta, isDark && styles.textMutedDark]}>{chapter.format.toUpperCase()} · {Math.round(chapter.progress * 100)}%</Text></View>
-        {chapter.id === series.currentChapterId && <View style={styles.dot} />}
-      </Pressable>}
+      ListEmptyComponent={<EmptyState title="尚未找到章节" />}
+      renderItem={({ item: chapter }) => <ChapterRow number={chapter.chapterNumber} title={chapter.chapterTitle} meta={chapter.format.toUpperCase()} progress={chapter.progress} current={chapter.id === series.currentChapterId} onPress={() => openChapter(chapter)} />}
     />
     <BottomSheet visible={seriesActions} onClose={() => setSeriesActions(false)} maxHeight="48%">
       <View style={styles.sheetHeading}>
         <Text style={[styles.sheetTitle, isDark && styles.textPrimaryDark]}>作品设置</Text>
         <IconButton name="close" label="关闭作品设置" onPress={() => setSeriesActions(false)} />
       </View>
-      <View style={[styles.settingsGroup, categoryUiStyles.seriesSettingsGroup, isDark && styles.cardDark]}>
-        <PressableScale accessibilityRole="button" accessibilityLabel="上传封面" style={[styles.settingRow, categoryUiStyles.seriesSettingsRow, styles.divider, isDark && styles.dividerDark]} onPress={() => { setSeriesActions(false); uploadCover(); }}>
-          <View style={styles.settingIcon}><Ionicons name="image-outline" size={20} color="#7257E7" /></View><Text style={[styles.settingLabel, isDark && styles.textPrimaryDark]}>上传封面</Text><Ionicons name="chevron-forward" size={18} color={isDark ? '#B8B1C2' : '#AAA5B0'} />
-        </PressableScale>
-        <PressableScale accessibilityRole="button" accessibilityLabel="添加作者" style={[styles.settingRow, categoryUiStyles.seriesSettingsRow, styles.divider, isDark && styles.dividerDark]} onPress={() => { setSeriesActions(false); setTagSheet('author'); }}>
-          <View style={styles.settingIcon}><Ionicons name="person-add-outline" size={20} color="#7257E7" /></View><Text style={[styles.settingLabel, isDark && styles.textPrimaryDark]}>添加作者</Text><Ionicons name="chevron-forward" size={18} color={isDark ? '#B8B1C2' : '#AAA5B0'} />
-        </PressableScale>
-        <PressableScale accessibilityRole="button" accessibilityLabel="添加标签" style={[styles.settingRow, categoryUiStyles.seriesSettingsRow]} onPress={() => { setSeriesActions(false); setTagSheet('general'); }}>
-          <View style={styles.settingIcon}><Ionicons name="pricetag-outline" size={20} color="#7257E7" /></View><Text style={[styles.settingLabel, isDark && styles.textPrimaryDark]}>添加标签</Text><Ionicons name="chevron-forward" size={18} color={isDark ? '#B8B1C2' : '#AAA5B0'} />
-        </PressableScale>
-      </View>
+      <SettingsGroup>
+        <SettingsRow title="上传封面" onPress={() => { setSeriesActions(false); uploadCover(); }} />
+        <SettingsRow title="添加作者" onPress={() => { setSeriesActions(false); setTagSheet('author'); }} />
+        <SettingsRow title="添加标签" onPress={() => { setSeriesActions(false); setTagSheet('general'); }} />
+      </SettingsGroup>
     </BottomSheet>
     <BottomSheet visible={tagSheet !== undefined} onClose={() => setTagSheet(undefined)}>
-      <View style={styles.sheetHeading}><Text style={[styles.sheetTitle, isDark && styles.textPrimaryDark]}>{tagSheet === 'author' ? '添加作者标签' : '添加普通标签'}</Text><PressableScale disabled={tagSaving} onPress={saveTag} style={styles.done}><Text style={styles.done}>{tagSaving ? '保存中…' : '保存'}</Text></PressableScale></View>
-      <TextInput autoFocus value={tagName} onChangeText={setTagName} placeholder={tagSheet === 'author' ? '作者名称' : '例如：科幻'} placeholderTextColor={isDark ? '#B8B1C2' : '#8A8691'} style={[styles.input, isDark && uiStyles.inputDark]} />
+      <ScreenHeader title={tagSheet === 'author' ? '添加作者标签' : '添加普通标签'} trailing={<IconButton name="close" label="关闭标签编辑" onPress={() => setTagSheet(undefined)} />} />
+      <TextField label={tagSheet === 'author' ? '作者名称' : '标签名称'} autoFocus value={tagName} onChangeText={setTagName} />
+      <Button label="保存标签" loading={tagSaving} disabled={!tagName.trim()} onPress={saveTag} />
     </BottomSheet>
-  </SafeAreaView>;
+  </Screen>;
 }
 
-function formatMinutes(value: number) { const minutes = Math.round(value / 60000); return minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes} min`; }
+const formatMinutes = formatReadingDuration;
 
 function StatsSummaryCard({ summary, onPress, isDark }: { summary: ReadingStatsSummary; onPress: () => void; isDark: boolean }) {
+  const { tokens } = useTheme();
+  const { styles } = useScreenStyles();
   const rows = normalizeDailyRows(summary);
   const max = Math.max(1, ...rows.map(item => item.durationMs));
-  return <PressableScale onPress={onPress} style={[styles.statsSummaryCard, isDark && styles.cardDark]}><View style={styles.statsSummaryTop}><View><Text style={[styles.statsEyebrow, isDark && styles.textMutedDark]}>最近 7 天</Text><Text style={[styles.statsSummaryValue, isDark && styles.textPrimaryDark]}>{formatMinutes(summary.totalDurationMs)}</Text><Text style={[styles.meta, isDark && styles.textMutedDark]}>{summary.totalPages} 页 · {summary.bookCount} 部作品</Text></View><Ionicons name="stats-chart" size={24} color={isDark ? '#C8B9FF' : '#7257E7'} /></View><View style={styles.miniChart}>{rows.map(item => <View key={item.key} style={styles.miniChartColumn}><View style={[styles.miniChartBar, { height: `${Math.max(5, item.durationMs / max * 100)}%` }]} /><Text style={[styles.miniChartLabel, isDark && styles.textMutedDark]}>{item.label}</Text></View>)}</View><Text style={styles.statsLink}>查看详细统计 →</Text></PressableScale>;
+  return <PressableScale onPress={onPress} style={[styles.statsSummaryCard, isDark && styles.cardDark]}><View style={styles.statsSummaryTop}><View><Text style={[styles.statsEyebrow, isDark && styles.textMutedDark]}>最近 7 天</Text><Text style={[styles.statsSummaryValue, isDark && styles.textPrimaryDark]}>{formatMinutes(summary.totalDurationMs)}</Text><Text style={[styles.meta, isDark && styles.textMutedDark]}>{summary.totalPages} 页 · {summary.bookCount} 部作品</Text></View><Ionicons name="stats-chart" size={24} color={isDark ? tokens.colors.primary : tokens.colors.primary} /></View><View style={styles.miniChart}>{rows.map(item => <View key={item.key} style={styles.miniChartColumn}><View style={[styles.miniChartBar, { height: `${Math.max(5, item.durationMs / max * 100)}%` }]} /><Text style={[styles.miniChartLabel, isDark && styles.textMutedDark]}>{item.label}</Text></View>)}</View><Text style={styles.statsLink}>查看详细统计 →</Text></PressableScale>;
 }
 
 function Recent({ series, openSeries, clearHistory, statsSummary, openStats }: { series: LibrarySeries[]; openSeries: (value: LibrarySeries) => void; clearHistory: (id: number) => void; statsSummary?: ReadingStatsSummary; openStats: () => void }) {
+  const { tokens, isDark } = useTheme();
+  const { width } = useWindowDimensions();
   const readSeries = series.filter(item => item.currentChapterId !== null);
-  const now = Date.now(); const day = 24 * 60 * 60 * 1000;
-  const sections: { title: string; data: LibrarySeries[] }[] = [
-    { title: '今天', data: readSeries.filter(item => now - item.updatedAt < day) },
-    { title: '一周内', data: readSeries.filter(item => { const age = now - item.updatedAt; return age >= day && age < 7 * day; }) },
-    { title: '更早', data: readSeries.filter(item => now - item.updatedAt >= 7 * day) },
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const week = new Date(today); week.setDate(week.getDate() - 6);
+  const sections = [
+    { title: '今天', data: readSeries.filter(item => item.updatedAt >= today.getTime()) },
+    { title: '一周内', data: readSeries.filter(item => item.updatedAt < today.getTime() && item.updatedAt >= week.getTime()) },
+    { title: '更早', data: readSeries.filter(item => item.updatedAt < week.getTime()) },
   ].filter(section => section.data.length > 0);
-  const { isDark } = useTheme(); const { width: viewportWidth } = useWindowDimensions(); const pageInset = getGridLayout(viewportWidth).pageInset;
-  return <SectionList sections={sections} keyExtractor={item => String(item.id)} contentInsetAdjustmentBehavior="automatic" contentContainerStyle={[styles.page, isDark && styles.pageDark, { paddingHorizontal: pageInset }]} renderSectionHeader={({ section }) => <View style={pageLayoutStyles.recentSectionHeader}><Text style={{ color: isDark ? '#B8B1C2' : '#8A8691', fontSize: 12, fontWeight: '700' }}>{section.title}</Text><View style={{ flex: 1, height: 1, backgroundColor: isDark ? '#342E3B' : '#E4E1E7' }} /></View>} renderItem={({ item }) => <View style={styles.historyRow}><PressableScale accessibilityRole="button" accessibilityLabel={`打开 ${item.title}`} style={pageLayoutStyles.historyOpenArea} onPress={() => openSeries(item)}>{item.coverUri ? <Image source={{ uri: item.coverUri }} style={styles.historyCover} /> : <View style={styles.historyFormat}><Text style={styles.formatText}>漫画</Text></View>}<View style={[styles.flex, pageLayoutStyles.rowContent, pageLayoutStyles.historyBody]}><Text numberOfLines={1} ellipsizeMode="tail" style={[styles.rowTitle, pageLayoutStyles.historyTitle, isDark && styles.textPrimaryDark]}>{item.title}</Text><View style={pageLayoutStyles.historyAuthorSlot}>{item.author && <Text numberOfLines={1} ellipsizeMode="tail" style={[pageLayoutStyles.historyAuthor, isDark && styles.textMutedDark]}>{compactAuthor(item.author)}</Text>}</View><Text numberOfLines={1} ellipsizeMode="tail" style={[styles.meta, pageLayoutStyles.historyProgress, isDark && styles.textMutedDark]}>阅读至 {item.currentChapterTitle || '章节'} · {Math.round(item.progress * 100)}%</Text></View></PressableScale><Pressable accessibilityRole="button" accessibilityLabel={`删除 ${item.title} 的阅读记录`} onPress={() => clearHistory(item.id)} style={[styles.historyDelete, pageLayoutStyles.trailingAction]} hitSlop={8}><Ionicons name="trash-outline" size={20} color={isDark ? '#B8B1C2' : '#9A949F'} /></Pressable></View>} ListHeaderComponent={<View><View style={[styles.header, pageLayoutStyles.pageHeader, categoryUiStyles.centeredHeader]}><Text style={[styles.title, pageLayoutStyles.pageTitle, isDark && styles.textPrimaryDark]}>最近阅读</Text><View style={pageLayoutStyles.headerSpacer} /></View>{statsSummary ? <StatsSummaryCard summary={statsSummary} onPress={openStats} isDark={isDark} /> : null}</View>} ListEmptyComponent={<View style={styles.empty}><Ionicons name="time-outline" size={36} color="#B2ADB7" /><Text style={[styles.meta, isDark && styles.textMutedDark]}>开始阅读一个章节后，它会出现在这里</Text></View>} />;
+  return <SectionList sections={sections} keyExtractor={item => String(item.id)} stickySectionHeadersEnabled={false} contentContainerStyle={{ padding: 16, paddingHorizontal: getGridLayout(width).pageInset }}
+    ListHeaderComponent={<View><ScreenHeader title="最近阅读" />{statsSummary && <StatsSummaryCard summary={statsSummary} onPress={openStats} isDark={isDark} />}</View>}
+    renderSectionHeader={({ section }) => <SectionHeader title={section.title} />}
+    renderItem={({ item }) => <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+      <PressableScale accessibilityRole="button" accessibilityLabel={'打开 ' + item.title} onPress={() => openSeries(item)} style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        <BookCover uri={item.coverUri} style={{ width: 64 }} />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text numberOfLines={2} style={[tokens.typography.label, { color: tokens.colors.text }]}>{item.title}</Text>
+          {!!item.author && <Text numberOfLines={1} style={[tokens.typography.caption, { color: tokens.colors.mutedText }]}>{compactAuthor(item.author)}</Text>}
+          <Text style={[tokens.typography.caption, { color: tokens.colors.mutedText, marginTop: 8 }]}>阅读至 {item.currentChapterTitle || '章节'} · {Math.round(item.progress * 100)}%</Text>
+        </View>
+      </PressableScale>
+      <IconButton name="trash-outline" label={'删除 ' + item.title + ' 的阅读记录'} onPress={() => clearHistory(item.id)} />
+    </View>}
+    ListEmptyComponent={<EmptyState icon="time-outline" title="还没有阅读记录" description="开始阅读一个章节后，它会出现在这里。" />}
+  />;
 }
-
-export { SeriesLibrary, SeriesDetail, Recent };
+export { Recent,SeriesDetail,SeriesLibrary };

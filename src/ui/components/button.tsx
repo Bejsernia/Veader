@@ -1,8 +1,8 @@
-import React from 'react';
-import { ActivityIndicator, StyleProp, Text, TextStyle, View, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { PressableScale, HapticKind } from './pressable-scale';
+import React from 'react';
+import { ActivityIndicator,StyleProp,Text,TextStyle,View,ViewStyle } from 'react-native';
 import { useTheme } from '../theme';
+import { HapticKind,PressableScale } from './pressable-scale';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
 

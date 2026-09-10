@@ -241,7 +241,7 @@ export function AppShell({ features }: { features: FeatureComponents }) {
   if (screen === 'readerSettings') return <ReaderSettings back={goBack} />;
 
   const content = !libraryReady
-    ? <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 }}><ActivityIndicator size="large" color="#8B70F7" /><Text style={{ color: isDark ? '#B8B1C2' : '#88838E' }}>正在加载漫画库…</Text></View>
+    ? <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 }}><ActivityIndicator size="large" color={tokens.colors.primary} /><Text style={{ color: tokens.colors.mutedText }}>正在加载漫画库…</Text></View>
     : tab === 'library'
       ? <Library series={series} importing={importing} refreshLibraries={refreshLibraries} openSeries={openSeries} continueSeries={continueSeries} openSources={() => setScreen('sources')} />
       : tab === 'categories'
@@ -250,9 +250,9 @@ export function AppShell({ features }: { features: FeatureComponents }) {
         ? <Recent series={series} openSeries={openSeries} clearHistory={id => progressRepository.clearHistory(id).then(() => refreshBooks()).catch(console.warn)} statsSummary={statsSummary} openStats={() => setScreen('readingStats')} />
         : <Me navigate={setScreen} />;
 
-  return <SafeAreaView style={{ flex: 1, backgroundColor: tokens.colors.background }}>
+  return <SafeAreaView edges={['top', 'left', 'right']} style={{ flex: 1, backgroundColor: tokens.colors.background }}>
     <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={tokens.colors.background} />
-    <View style={{ flex: 1, paddingBottom: 82 + insets.bottom }}>{content}</View>
+    <View style={{ flex: 1, paddingBottom: 74 + insets.bottom }}>{content}</View>
     <BottomTabBar tabs={appTabs.map(item => ({ key: item.key, label: item.label, icon: item.icon }))} value={tab} onChange={key => setTab(key as Tab)} />
   </SafeAreaView>;
 }

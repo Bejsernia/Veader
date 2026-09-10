@@ -1,8 +1,8 @@
-import React from 'react';
-import { Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Button } from './button';
+import React from 'react';
+import { Text,View } from 'react-native';
 import { useTheme } from '../theme';
+import { Button } from './button';
 
 export function EmptyState({ icon = 'library-outline', title, description, actionLabel, onAction }: { icon?: keyof typeof Ionicons.glyphMap; title: string; description?: string; actionLabel?: string; onAction?: () => void }) {
   const { tokens } = useTheme();

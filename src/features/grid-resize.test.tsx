@@ -5,8 +5,8 @@ import { SeriesLibrary } from './library/LibraryScreens';
 import { CategoriesScreen } from './categories/CategoriesScreen';
 const mockWindow = { width: 375, height: 800, scale: 1, fontScale: 1 };
 jest.mock('react-native/Libraries/Utilities/useWindowDimensions', () => ({ __esModule: true, default: () => mockWindow }));
-jest.mock('../ui/theme', () => ({ useTheme: () => ({ isDark: false, reducedMotion: true, tokens: jest.requireActual('../ui/theme').lightTokens }) }));
-jest.mock('../ui/components/bottom-sheet', () => ({ BottomSheet: () => null }));
+jest.mock('../ui/theme', () => ({ ...jest.requireActual('../ui/theme'), useTheme: () => ({ isDark: false, reducedMotion: true, tokens: jest.requireActual('../ui/theme').lightTokens }) }));
+jest.mock('../ui/components/bottom-sheet', () => ({ BottomSheet: ({ visible, children }: any) => visible ? children : null }));
 jest.mock('../ui/components/book-card', () => ({ BookCard: () => null }));
 jest.mock('../data/category-repository', () => ({ categoryRepository: { listCategories: async () => [{ id: 1, name: '测试分类', tags: [], bookCount: 0 }] } }));
 jest.mock('../data/tag-repository', () => ({ tagRepository: { listTags: async () => [] } }));
@@ -33,4 +33,12 @@ it('remounts the selected category grid across column breakpoints', async () => 
     screen.rerender(React.cloneElement(element));
     expect(screen.UNSAFE_getByType(FlatList).props.numColumns).toBe(columns);
   }
+});
+
+it('opens the category editor from inside the selected category', async () => {
+  const screen = render(<CategoriesScreen series={[]} openSeries={jest.fn()} />);
+  await waitFor(() => expect(screen.getByLabelText('打开分类测试分类')).toBeTruthy());
+  fireEvent.press(screen.getByLabelText('打开分类测试分类'));
+  fireEvent.press(screen.getByLabelText('编辑分类'));
+  expect(screen.getByLabelText('分类名称').props.value).toBe('测试分类');
 });

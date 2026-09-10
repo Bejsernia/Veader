@@ -1,21 +1,21 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, Platform, Text, View } from 'react-native';
-import Constants from 'expo-constants';
 import { Ionicons } from '@expo/vector-icons';
+import Constants from 'expo-constants';
+import React,{ useEffect,useRef,useState } from 'react';
+import { ActivityIndicator,AppState,Platform,Text,View } from 'react-native';
 import type { AppScreen } from '../../app/navigation';
-import type { ReaderPreferences } from '../../preferences';
-import { readerSettingsRepository } from '../../data/reader-settings-repository';
 import { formatCacheSize } from '../../cache';
-import { cacheManager, CacheBreakdown, CacheKind } from '../../data/cache-manager';
-import { useTheme } from '../../ui/theme';
-import { Screen } from '../../ui/components/screen';
-import { ScreenHeader } from '../../ui/components/screen-header';
-import { SettingsGroup } from '../../ui/components/settings-group';
-import { SettingsRow } from '../../ui/components/settings-row';
-import { SegmentedControl } from '../../ui/components/segmented-control';
-import { TextField } from '../../ui/components/text-field';
+import { CacheBreakdown,CacheKind,cacheManager } from '../../data/cache-manager';
+import { readerSettingsRepository } from '../../data/reader-settings-repository';
+import type { ReaderPreferences } from '../../preferences';
 import { Button } from '../../ui/components/button';
 import { Card } from '../../ui/components/card';
+import { Screen } from '../../ui/components/screen';
+import { ScreenHeader } from '../../ui/components/screen-header';
+import { SegmentedControl } from '../../ui/components/segmented-control';
+import { SettingsGroup } from '../../ui/components/settings-group';
+import { SettingsRow } from '../../ui/components/settings-row';
+import { TextField } from '../../ui/components/text-field';
+import { useTheme } from '../../ui/theme';
 import { ReaderSettingsFields } from '../reader/ReaderSettingsFields';
 
 export function Me({ navigate }: { navigate: (screen: AppScreen) => void }) {
