@@ -23,7 +23,7 @@ jest.mock('expo-haptics', () => ({
 jest.mock('react-native-gesture-handler', () => {
   const React = require('react');
   const ReactNative = require('react-native');
-  const chain = () => ({ onUpdate() { return this; }, onEnd() { return this; } });
+  const chain = () => ({ activeOffsetX() { return this; }, onUpdate() { return this; }, onEnd() { return this; } });
   return {
     GestureHandlerRootView: ReactNative.View,
     GestureDetector: ({ children }) => React.createElement(ReactNative.View, null, children),

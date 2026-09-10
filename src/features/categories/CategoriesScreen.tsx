@@ -141,6 +141,7 @@ export function CategoriesScreen({ series, openSeries }: Props) {
 
   if (selected) return <SafeAreaView style={[styles.safe, isDark && styles.safeDark]}>
     <FlatList
+      key={grid.columns}
       data={selectedSeries}
       numColumns={grid.columns}
       keyExtractor={item => String(item.id)}

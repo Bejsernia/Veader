@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleProp, Text, TextStyle, View, ViewStyle } from 'react-native';
+import { Pressable, StyleProp, Text, TextStyle, View, ViewStyle } from 'react-native';
 import { useTheme } from '../theme';
 
 type Props = { icon?: React.ReactNode; title: string; description?: string; value?: string; control?: React.ReactNode; onPress?: () => void; style?: StyleProp<ViewStyle>; titleStyle?: StyleProp<TextStyle> };
@@ -15,5 +15,5 @@ export function SettingsRow({ icon, title, description, value, control, onPress,
     {value ? <Text numberOfLines={2} ellipsizeMode="tail" style={{ maxWidth: '35%', color: tokens.colors.mutedText, fontSize: 13, lineHeight: 18, textAlign: 'right' }}>{value}</Text> : null}
     {control}
   </View>;
-  return onPress ? <View accessibilityRole="button">{content}</View> : content;
+  return onPress ? <Pressable accessibilityRole="button" onPress={onPress}>{content}</Pressable> : content;
 }

@@ -15,17 +15,16 @@ import { IconButton } from '../shared/library-ui';
 type SourceKind = '本地文件夹' | 'SMB' | 'FTP';
 const SOURCE_DELETE_WIDTH = 60;
 
-function SwipeableSourceRow({ source, isDark, onRemove, onToggle, onRename }: { source: StoredSource; isDark: boolean; onRemove: () => void; onToggle: (enabled: boolean) => void; onRename: () => void }) {
+export function SwipeableSourceRow({ source, isDark, onRemove, onToggle, onRename }: { source: StoredSource; isDark: boolean; onRemove: () => void; onToggle: (enabled: boolean) => void; onRename: () => void }) {
   const translateX = useSharedValue(0);
   const pan = Gesture.Pan().activeOffsetX([-10, 10]).onUpdate(event => { translateX.value = Math.max(-SOURCE_DELETE_WIDTH, Math.min(0, event.translationX)); }).onEnd(() => { translateX.value = withSpring(translateX.value < -SOURCE_DELETE_WIDTH * 0.55 ? -SOURCE_DELETE_WIDTH : 0); });
   const animatedStyle = useAnimatedStyle(() => ({ transform: [{ translateX: translateX.value }] }));
   return <View style={styles.sourceSwipe}>
     <Pressable accessibilityRole="button" accessibilityLabel={`删除漫画源 ${source.name}`} style={[styles.sourceDelete, layoutStyles.sourceDeleteInset]} onPress={onRemove}><Ionicons name="trash-outline" size={21} color="#fff" /><Text style={styles.sourceDeleteText}>删除</Text></Pressable>
-    <GestureDetector gesture={pan}><Animated.View style={animatedStyle}><PressableScale haptic="light" accessibilityRole="button" accessibilityLabel={`${source.name}，长按重命名，向左滑显示删除`} onLongPress={onRename} style={[styles.sourceCard, layoutStyles.sourceCardInset, isDark && styles.cardDark]}>
+    <GestureDetector gesture={pan}><Animated.View style={[styles.sourceCard, layoutStyles.sourceCardInset, isDark && styles.cardDark, animatedStyle]}><PressableScale haptic="light" accessibilityRole="button" accessibilityLabel={`${source.name}，长按重命名，向左滑显示删除`} onLongPress={onRename} style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
       <View style={[styles.sourceIcon, { backgroundColor: source.type === 'local' ? '#7257E7' : '#4D9E81' }]}><Ionicons name={source.type === 'local' ? 'folder' : 'server'} size={23} color="#fff" /></View>
       <View style={[styles.flex, { minWidth: 0 }]}><Text numberOfLines={2} ellipsizeMode="tail" style={[styles.rowTitle, isDark && styles.textPrimaryDark]}>{source.name}</Text><Text numberOfLines={1} ellipsizeMode="tail" style={[styles.meta, isDark && styles.textMutedDark]}>{source.type.toUpperCase()} · {source.endpoint}</Text><Text numberOfLines={1} ellipsizeMode="tail" style={[styles.sourceStatus, isDark && uiStyles.sourceStatusDark]}>{source.bookCount} 部作品 · {source.type === 'local' ? '长按重命名' : '原生协议扫描'}</Text></View>
-      <Switch accessibilityLabel={`启用 ${source.name}`} value={source.enabled} onValueChange={onToggle} trackColor={{ true: '#765BE8' }} />
-    </PressableScale></Animated.View></GestureDetector>
+    </PressableScale><Switch accessibilityLabel={`启用 ${source.name}`} value={source.enabled} onValueChange={onToggle} trackColor={{ true: '#765BE8' }} /></Animated.View></GestureDetector>
   </View>;
 }
 
