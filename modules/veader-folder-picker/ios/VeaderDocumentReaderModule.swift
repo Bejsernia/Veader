@@ -38,9 +38,12 @@ public class VeaderDocumentReaderModule: Module {
         guard let data = image.pngData() else {
           throw NSError(domain: "VeaderDocumentReader", code: 2, userInfo: [NSLocalizedDescriptionKey: "PDF 页面渲染失败"])
         }
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("veader-pdf-pages", isDirectory: true)
+        guard let cache = self.appContext?.config.cacheDirectory else {
+          throw NSError(domain: "VeaderDocumentReader", code: 5, userInfo: [NSLocalizedDescriptionKey: "缓存目录不可用"])
+        }
+        let root = cache.appendingPathComponent("pdf-pages", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let target = root.appendingPathComponent("\(stableKey(uri))-(pageIndex)-(Int(width)).png")
+        let target = root.appendingPathComponent("\(stableKey(uri))-\(pageIndex)-\(Int(width)).png")
         try data.write(to: target, options: .atomic)
         promise.resolve(target.absoluteString)
       } catch {
@@ -66,4 +69,3 @@ private func stableKey(_ value: String) -> String {
   value.utf8.reduce(into: 5381) { hash, byte in hash = ((hash << 5) &+ hash) &+ Int(byte) }
     .description
 }
-

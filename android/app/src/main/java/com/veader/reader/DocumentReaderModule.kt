@@ -17,6 +17,9 @@ import java.nio.channels.FileChannel
 import java.security.MessageDigest
 import android.os.ParcelFileDescriptor
 import android.graphics.pdf.PdfRenderer
+import android.provider.DocumentsContract
+import android.provider.OpenableColumns
+import java.util.UUID
 
 /** Native, bounded page operations. Original books always stay at their granted URI. */
 class DocumentReaderModule(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
@@ -85,7 +88,7 @@ class DocumentReaderModule(private val context: ReactApplicationContext) : React
       val cacheDir = File(context.cacheDir, "pdf-pages")
       if (!cacheDir.exists()) cacheDir.mkdirs()
       val safeWidth = targetWidth.coerceIn(480, 2048)
-      val output = File(cacheDir, "${digest(uri + pageIndex + safeWidth)}.png")
+      val output = File(cacheDir, "${digest("pdf-v2|${sourceVersion(uri)}|$pageIndex|$safeWidth")}.png")
       if (output.exists() && output.length() > 0) {
         promise.resolve(output.toURI().toString())
         return
@@ -100,7 +103,7 @@ class DocumentReaderModule(private val context: ReactApplicationContext) : React
             val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             bitmap.eraseColor(Color.WHITE)
             page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-            FileOutputStream(output).use { stream -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream) }
+            publishBitmap(output, bitmap, Bitmap.CompressFormat.PNG)
             bitmap.recycle()
           }
         }
@@ -134,7 +137,7 @@ class DocumentReaderModule(private val context: ReactApplicationContext) : React
       val safeWidth = targetWidth.coerceIn(480, 2048)
       val cacheDir = File(context.cacheDir, "mobi-pages-native")
       if (!cacheDir.exists()) cacheDir.mkdirs()
-      val output = File(cacheDir, "${digest(uri + recordIndex + safeWidth)}.jpg")
+      val output = File(cacheDir, "${digest("mobi-v2|${sourceVersion(uri)}|$recordIndex|$safeWidth")}.jpg")
       // Check the disk cache before opening SAF, parsing the record table, and
       // decoding a bitmap. A cache hit should not repeat those expensive steps.
       if (output.exists() && output.length() > 0L) {
@@ -155,7 +158,7 @@ class DocumentReaderModule(private val context: ReactApplicationContext) : React
         val options = BitmapFactory.Options().apply { inSampleSize = sampleSize(bounds.outWidth, bounds.outHeight, safeWidth) }
         val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) ?: throw IllegalArgumentException("MOBI 图片无法解码")
         if (!output.exists() || output.length() == 0L) {
-          FileOutputStream(output).use { stream -> bitmap.compress(Bitmap.CompressFormat.JPEG, 92, stream) }
+          publishBitmap(output, bitmap, Bitmap.CompressFormat.JPEG)
         }
         bitmap.recycle()
         promise.resolve(output.toURI().toString())
@@ -168,7 +171,7 @@ class DocumentReaderModule(private val context: ReactApplicationContext) : React
     try {
       val cacheDir = File(context.cacheDir, "cropped-pages")
       if (!cacheDir.exists()) cacheDir.mkdirs()
-      val output = File(cacheDir, "${digest(uri)}.png")
+      val output = File(cacheDir, "${digest("crop-v2|${sourceVersion(uri)}")}.png")
       if (output.exists() && output.length() > 0) {
         promise.resolve(output.toURI().toString())
         return
@@ -182,7 +185,7 @@ class DocumentReaderModule(private val context: ReactApplicationContext) : React
       val box = findContent(bitmap)
       if (box != null && (box.width() < bitmap.width * 0.97f || box.height() < bitmap.height * 0.97f)) {
         val cropped = Bitmap.createBitmap(bitmap, box?.left ?: 0, box?.top ?: 0, box?.width() ?: bitmap.width, box?.height() ?: bitmap.height)
-        FileOutputStream(output).use { stream -> cropped.compress(Bitmap.CompressFormat.PNG, 100, stream) }
+        publishBitmap(output, cropped, Bitmap.CompressFormat.PNG)
         cropped.recycle()
         bitmap.recycle()
         promise.resolve(output.toURI().toString())
@@ -191,6 +194,41 @@ class DocumentReaderModule(private val context: ReactApplicationContext) : React
         promise.resolve(uri)
       }
     } catch (error: Exception) { promise.reject("IMAGE_CROP_FAILED", error.message, error) }
+  }
+
+  private fun sourceVersion(uri: String): String {
+    val parsed = Uri.parse(uri)
+    if (parsed.scheme == "file") {
+      val file = File(parsed.path ?: throw IllegalArgumentException("无效文件路径"))
+      if (!file.isFile) throw IllegalArgumentException("源文件不存在")
+      return "$uri|${file.length()}|${file.lastModified()}"
+    }
+    try {
+      context.contentResolver.query(parsed, arrayOf(OpenableColumns.SIZE, DocumentsContract.Document.COLUMN_LAST_MODIFIED), null, null, null)?.use { cursor ->
+        if (cursor.moveToFirst()) {
+          val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+          val timeIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+          if (sizeIndex >= 0 && timeIndex >= 0 && !cursor.isNull(sizeIndex) && !cursor.isNull(timeIndex)) {
+            val modified = cursor.getLong(timeIndex)
+            if (modified > 0L) return "$uri|${cursor.getLong(sizeIndex)}|$modified"
+          }
+        }
+      }
+    } catch (_: Exception) { /* Some document providers do not expose timestamps. */ }
+    // An unknown version must not turn into a permanent stale cache hit.
+    return "$uri|uncached-${UUID.randomUUID()}"
+  }
+
+  private fun publishBitmap(output: File, bitmap: Bitmap, format: Bitmap.CompressFormat) {
+    val temporary = File.createTempFile(output.name, ".part", output.parentFile)
+    try {
+      FileOutputStream(temporary).use { stream ->
+        if (!bitmap.compress(format, if (format == Bitmap.CompressFormat.JPEG) 92 else 100, stream)) {
+          throw IllegalStateException("页面图片写入失败")
+        }
+      }
+      if (!temporary.renameTo(output)) throw IllegalStateException("页面缓存发布失败")
+    } finally { temporary.delete() }
   }
 
   private fun openPdf(uri: String): ParcelFileDescriptor {
