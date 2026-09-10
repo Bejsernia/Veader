@@ -1,17 +1,18 @@
 import React from 'react';
-import { StyleProp, Text, TextStyle, View, ViewStyle } from 'react-native';
+import { StyleProp, Text, View, ViewStyle } from 'react-native';
 import { useTheme } from '../theme';
+import { IconButton } from './icon-button';
 
-type Props = { title: string; subtitle?: string; leading?: React.ReactNode; trailing?: React.ReactNode; style?: StyleProp<ViewStyle>; titleStyle?: StyleProp<TextStyle> };
-
-export function ScreenHeader({ title, subtitle, leading, trailing, style, titleStyle }: Props) {
+export function ScreenHeader({ title, subtitle, back, trailing, style }: {
+  title: string; subtitle?: string; back?: () => void; trailing?: React.ReactNode; style?: StyleProp<ViewStyle>;
+}) {
   const { tokens } = useTheme();
-  return <View style={[{ minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: tokens.spacing.sm, paddingHorizontal: tokens.spacing.lg }, style]}>
-    {leading}
-    <View style={{ flex: 1, minWidth: 0 }}>
-      <Text numberOfLines={2} style={[{ color: tokens.colors.text, fontSize: 22, lineHeight: 28, fontWeight: '800' }, titleStyle]}>{title}</Text>
-      {subtitle ? <Text numberOfLines={2} style={{ color: tokens.colors.mutedText, fontSize: 13, lineHeight: 19, marginTop: 2 }}>{subtitle}</Text> : null}
+  return <View style={[{ marginBottom: tokens.spacing.xl }, style]}>
+    <View style={{ minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: tokens.spacing.sm }}>
+      {back && <IconButton name="chevron-back" label="返回" onPress={back} />}
+      <Text accessibilityRole="header" numberOfLines={2} style={[back ? tokens.typography.sectionTitle : tokens.typography.pageTitle, { flex: 1, color: tokens.colors.text }]}>{title}</Text>
+      {trailing}
     </View>
-    {trailing}
+    {subtitle && <Text style={[tokens.typography.body, { color: tokens.colors.mutedText, marginTop: tokens.spacing.sm }]}>{subtitle}</Text>}
   </View>;
 }

@@ -25,11 +25,11 @@ describe('UI interaction primitives', () => {
     expect(getByRole('button', { name: '打开书籍' }).props.accessibilityState).toEqual(expect.objectContaining({ disabled: true, busy: true }));
   });
 
-  test('icon button keeps an accessible 44dp target', async () => {
+  test('icon button keeps an accessible 48dp target', async () => {
     const { getByRole } = renderWithTheme(<IconButton name="search" label="搜索作品" />);
     await waitFor(() => expect(getByRole('button', { name: '搜索作品' })).toBeTruthy());
     const button = getByRole('button', { name: '搜索作品' });
     expect(button).toBeTruthy();
-    expect(button.props.style[0][0]).toEqual(expect.objectContaining({ width: 44, height: 44 }));
+    expect(button.props.style[0][0]).toEqual(expect.objectContaining({ width: 48, height: 48 }));
   });
 });

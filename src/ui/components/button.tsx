@@ -19,7 +19,7 @@ export function Button({ label, onPress, variant = 'primary', icon, loading = fa
 }) {
   const { tokens } = useTheme();
   const isDisabled = disabled || loading;
-  const backgroundColor = variant === 'primary' ? tokens.colors.primary : variant === 'danger' ? `${tokens.colors.danger}20` : variant === 'secondary' ? tokens.colors.elevated : 'transparent';
+  const backgroundColor = variant === 'primary' ? tokens.colors.primary : variant === 'danger' ? tokens.colors.dangerContainer : variant === 'secondary' ? tokens.colors.elevated : 'transparent';
   const foreground = variant === 'primary' ? tokens.colors.onPrimary : variant === 'danger' ? tokens.colors.danger : tokens.colors.primary;
   return <PressableScale
     accessibilityRole="button"
@@ -43,6 +43,6 @@ export function Button({ label, onPress, variant = 'primary', icon, loading = fa
     }, style]}
   >
     {loading ? <ActivityIndicator color={foreground} /> : icon ? <Ionicons name={icon} size={19} color={foreground} /> : null}
-    <View style={{ minWidth: 0, flexShrink: 1 }}><Text numberOfLines={2} style={[{ color: foreground, fontSize: 15, lineHeight: 20, fontWeight: '800', textAlign: 'center' }, labelStyle]}>{label}</Text></View>
+    <View style={{ minWidth: 0, flexShrink: 1 }}><Text numberOfLines={2} style={[{ color: foreground, ...tokens.typography.label, textAlign: 'center' }, labelStyle]}>{label}</Text></View>
   </PressableScale>;
 }

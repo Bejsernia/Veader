@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { AccessibilityInfo, useColorScheme } from 'react-native';
+import { AccessibilityInfo, TextStyle, useColorScheme } from 'react-native';
 import { loadThemeMode, saveThemeMode, ThemeMode } from '../preferences';
 
 export type ThemeTokens = {
@@ -16,7 +16,11 @@ export type ThemeTokens = {
     danger: string;
     onPrimary: string;
     scrim: string;
+    selectedContainer: string;
+    onSelectedContainer: string;
+    dangerContainer: string;
   };
+  typography: Record<'pageTitle' | 'sectionTitle' | 'body' | 'label' | 'caption', TextStyle>;
   spacing: Record<'xs' | 'sm' | 'md' | 'lg' | 'xl' | 'xxl', number>;
   radius: Record<'sm' | 'md' | 'lg' | 'xl' | 'pill', number>;
   motion: {
@@ -31,6 +35,13 @@ const spacing = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 } as const;
 const radius = { sm: 10, md: 14, lg: 18, xl: 26, pill: 999 } as const;
 const motion = { fast: 160, normal: 220, emphasis: 360, stagger: 48 } as const;
 
+export const typography: ThemeTokens['typography'] = {
+  pageTitle: { fontSize: 28, lineHeight: 36, fontWeight: '800' },
+  sectionTitle: { fontSize: 19, lineHeight: 26, fontWeight: '700' },
+  body: { fontSize: 15, lineHeight: 23, fontWeight: '400' },
+  label: { fontSize: 15, lineHeight: 21, fontWeight: '600' },
+  caption: { fontSize: 12, lineHeight: 18, fontWeight: '400' },
+};
 export const darkTokens: ThemeTokens = {
   colors: {
     background: '#0F0E14',
@@ -45,10 +56,12 @@ export const darkTokens: ThemeTokens = {
     danger: '#FF7185',
     onPrimary: '#181225',
     scrim: 'rgba(0,0,0,0.58)',
+    selectedContainer: '#30264A', onSelectedContainer: '#D8C9FF', dangerContainer: '#3A2229',
   },
   spacing,
   radius,
   motion,
+  typography,
 };
 
 export const lightTokens: ThemeTokens = {
@@ -65,10 +78,12 @@ export const lightTokens: ThemeTokens = {
     danger: '#C63F58',
     onPrimary: '#FFFFFF',
     scrim: 'rgba(0,0,0,0.52)',
+    selectedContainer: '#EBE4FF', onSelectedContainer: '#5935B5', dangerContainer: '#FBE7EC',
   },
   spacing,
   radius,
   motion,
+  typography,
 };
 
 export type ThemeContextValue = {

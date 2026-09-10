@@ -20,9 +20,10 @@ export function IconButton({ name, label, onPress, style, color, dark = false, h
     accessibilityLabel={label}
     hitSlop={6}
     disabled={disabled}
+    accessibilityState={{ disabled: Boolean(disabled) }}
     haptic={haptic}
     android_ripple={{ color: `${tokens.colors.primary}30`, borderless: true }}
-    style={[{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22 }, style]}
+    style={[{ width: 48, height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 22 }, style]}
     onPress={onPress}
   >
     <Ionicons name={name} size={22} color={color ?? (dark || isDark ? tokens.colors.text : tokens.colors.text)} />

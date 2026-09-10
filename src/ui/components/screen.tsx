@@ -1,19 +1,22 @@
 import React from 'react';
-import { ScrollView, ScrollViewProps, StyleProp, View, ViewStyle } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ScrollView, ScrollViewProps, StyleProp, View, ViewStyle, useWindowDimensions } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../theme';
+import { getGridLayout } from '../layout';
 
-type ScreenProps = {
-  children: React.ReactNode;
-  style?: StyleProp<ViewStyle>;
-  contentStyle?: StyleProp<ViewStyle>;
-  scroll?: boolean;
+/** Standalone pages own safe areas; tab content passes safeArea=false. */
+export function Screen({ children, scroll = false, safeArea = true, style, contentStyle, scrollProps }: {
+  children: React.ReactNode; scroll?: boolean; safeArea?: boolean;
+  style?: StyleProp<ViewStyle>; contentStyle?: StyleProp<ViewStyle>;
   scrollProps?: Omit<ScrollViewProps, 'contentContainerStyle'>;
-};
-
-export function Screen({ children, style, contentStyle, scroll = false, scrollProps }: ScreenProps) {
+}) {
   const { tokens } = useTheme();
-  const insets = useSafeAreaInsets();
-  const content = <View style={[{ flexGrow: 1, paddingBottom: insets.bottom + tokens.spacing.lg }, contentStyle]}>{children}</View>;
-  return <View style={[{ flex: 1, backgroundColor: tokens.colors.background }, style]}>{scroll ? <ScrollView {...scrollProps} contentContainerStyle={contentStyle}>{children}</ScrollView> : content}</View>;
+  const { width } = useWindowDimensions();
+  const Container = safeArea ? SafeAreaView : View;
+  return <Container style={[{ flex: 1, backgroundColor: tokens.colors.background }, style]}>
+    {scroll ? <ScrollView keyboardShouldPersistTaps="handled" {...scrollProps} contentContainerStyle={[{
+      padding: tokens.spacing.lg, paddingHorizontal: getGridLayout(width).pageInset,
+      paddingBottom: tokens.spacing.xxl, width: '100%', maxWidth: 960, alignSelf: 'center',
+    }, contentStyle]}>{children}</ScrollView> : children}
+  </Container>;
 }
