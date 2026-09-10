@@ -2,7 +2,7 @@ import React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
 import { SwipeableSourceRow } from './SourcesScreen';
 import type { StoredSource } from '../../domain/models';
-jest.mock('../../ui/theme', () => ({ useTheme: () => ({ isDark: false, reducedMotion: true }) }));
+jest.mock('../../ui/theme', () => ({ useTheme: () => ({ isDark: false, reducedMotion: true, tokens: jest.requireActual('../../ui/theme').lightTokens }) }));
 jest.mock('../../data/library-repository', () => ({}));
 jest.mock('../../data/source-repository', () => ({}));
 jest.mock('../../protocols', () => ({}));

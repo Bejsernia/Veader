@@ -1,62 +1,113 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, AppState, Platform, Pressable, ScrollView, Switch, Text, TextInput, ToastAndroid, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, AppState, Platform, Text, View } from 'react-native';
+import Constants from 'expo-constants';
 import { Ionicons } from '@expo/vector-icons';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import type { AppScreen as Screen } from '../../app/navigation';
-import { ThemeMode, type ReaderPreferences } from '../../preferences';
+import type { AppScreen } from '../../app/navigation';
+import type { ReaderPreferences } from '../../preferences';
 import { readerSettingsRepository } from '../../data/reader-settings-repository';
 import { formatCacheSize } from '../../cache';
-import { cacheManager } from '../../data/cache-manager';
+import { cacheManager, CacheBreakdown, CacheKind } from '../../data/cache-manager';
 import { useTheme } from '../../ui/theme';
-import { categoryUiStyles, styles, layoutStyles, pageLayoutStyles, uiStyles } from '../../ui/legacy-styles';
-import { IconButton } from '../shared/library-ui';
-import { getGridLayout } from '../../ui/layout';
-import type { StoredSource } from '../../domain/models';
+import { Screen } from '../../ui/components/screen';
+import { ScreenHeader } from '../../ui/components/screen-header';
+import { SettingsGroup } from '../../ui/components/settings-group';
+import { SettingsRow } from '../../ui/components/settings-row';
+import { SegmentedControl } from '../../ui/components/segmented-control';
+import { TextField } from '../../ui/components/text-field';
+import { Button } from '../../ui/components/button';
+import { Card } from '../../ui/components/card';
+import { ReaderSettingsFields } from '../reader/ReaderSettingsFields';
 
-function Me({ navigate }: { navigate: (screen: Screen) => void }) {
-  const groups: [keyof typeof Ionicons.glyphMap, string][][] = [[['folder-open-outline', '漫画源'], ['cube-outline', '缓存'], ['options-outline', '阅读设置']], [['information-circle-outline', '关于 Veader']]];
-  const destinations: Record<string, Screen> = { '漫画源': 'sources', '缓存': 'cache', '阅读设置': 'readerSettings', '关于 Veader': 'about' };
-  const { mode, isDark, setMode } = useTheme(); const { width: viewportWidth } = useWindowDimensions(); const pageInset = getGridLayout(viewportWidth).pageInset;
-  const modeLabel = mode === 'system' ? '自动' : mode === 'dark' ? '黑夜' : '白天';
-  const cycleTheme = () => {
-    const nextMode: ThemeMode = mode === 'system' ? 'light' : mode === 'light' ? 'dark' : 'system';
-    const label = nextMode === 'system' ? '自动' : nextMode === 'dark' ? '黑夜' : '白天';
-    setMode(nextMode);
-    if (Platform.OS === 'android') ToastAndroid.show(`已切换到${label}模式`, ToastAndroid.SHORT);
-    else Alert.alert('界面主题', `已切换到${label}模式`);
+export function Me({ navigate }: { navigate: (screen: AppScreen) => void }) {
+  const { mode, setMode, tokens } = useTheme();
+  const links: { icon: keyof typeof Ionicons.glyphMap; title: string; screen: AppScreen }[] = [
+    { icon: 'folder-open-outline', title: '漫画源', screen: 'sources' },
+    { icon: 'cube-outline', title: '缓存', screen: 'cache' },
+    { icon: 'options-outline', title: '阅读设置', screen: 'readerSettings' },
+    { icon: 'information-circle-outline', title: '关于 Veader', screen: 'about' },
+  ];
+  return <Screen safeArea={false} scroll><ScreenHeader title="我的" />
+    <SettingsGroup>{links.map(link => <SettingsRow key={link.screen} title={link.title} icon={<Ionicons name={link.icon} size={22} color={tokens.colors.primary} />} onPress={() => navigate(link.screen)} />)}</SettingsGroup>
+    <SegmentedControl label="界面主题" value={mode} onChange={setMode} options={[{ value: 'system', label: '跟随系统' }, { value: 'light', label: '浅色' }, { value: 'dark', label: '深色' }]} />
+  </Screen>;
+}
+
+export function ReaderSettingsPage({ back }: { back: () => void }) {
+  const { tokens } = useTheme();
+  const [settings, setSettings] = useState<ReaderPreferences>();
+  const [error, setError] = useState('');
+  const writes = useRef(Promise.resolve());
+  useEffect(() => { let active = true; readerSettingsRepository.loadGlobal().then(value => { if (active) setSettings(value); }).catch(reason => { if (active) setError(String(reason)); }); return () => { active = false; }; }, []);
+  const update = (patch: ReaderPreferences) => {
+    setSettings(current => ({ ...current, ...patch }));
+    writes.current = writes.current.then(() => readerSettingsRepository.saveGlobal(patch)).then(() => setError('')).catch(reason => setError(String(reason)));
   };
-  return <View style={[styles.flex, isDark && styles.pageDark]}><ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={[styles.page, isDark && styles.pageDark, { paddingHorizontal: pageInset }]}><View style={[styles.header, pageLayoutStyles.pageHeader, categoryUiStyles.centeredHeader]}><Text style={[styles.title, pageLayoutStyles.pageTitle, isDark && styles.textPrimaryDark]}>我的</Text><Pressable accessibilityRole="button" accessibilityLabel={`切换界面主题，当前${modeLabel}`} style={[styles.themeButton, pageLayoutStyles.trailingAction, isDark && styles.themeButtonDark]} onPress={cycleTheme}><Ionicons name={mode === 'dark' ? 'moon' : mode === 'system' ? 'contrast' : 'sunny'} size={20} color={isDark ? '#5B21B6' : '#7257E7'} /></Pressable></View>{groups.map((group, groupIndex) => <View style={[styles.settingsGroup, pageLayoutStyles.alignedSettingsGroup, isDark && styles.cardDark]} key={groupIndex}>{group.map(([icon, label], index) => <Pressable accessibilityRole="button" key={label} onPress={() => navigate(destinations[label]!)} style={({ pressed }) => [styles.settingRow, pageLayoutStyles.alignedSettingRow, index < group.length - 1 && styles.divider, isDark && styles.dividerDark, pressed && styles.pressed]}><View style={styles.settingIcon}><Ionicons name={icon} size={20} color="#7257E7" /></View><Text style={[styles.settingLabel, isDark && styles.textPrimaryDark]}>{label}</Text><Ionicons name="chevron-forward" size={18} color={isDark ? '#B8B1C2' : '#AAA5B0'} /></Pressable>)}</View>)}</ScrollView></View>;
+  return <Screen scroll><ScreenHeader title="全局阅读设置" back={back} subtitle="这些设置作为每本书的默认值，书内的单独设置优先。" />
+    {error ? <Text accessibilityLiveRegion="polite" style={{ color: tokens.colors.danger }}>{error}</Text> : null}
+    {settings ? <ReaderSettingsFields value={settings} onChange={update} /> : <ActivityIndicator color={tokens.colors.primary} />}
+  </Screen>;
 }
 
-function ReaderSettingsPage({ back }: { back: () => void }) {
-  const { isDark } = useTheme();
-  const [settings, setSettings] = useState<ReaderPreferences>({ readingDirection: 'ltr', tapZones: true, smooth: true, dark: true, crop: false, notch: false, volume: true, pageMode: 'single', doubleOrder: 'natural' });
-  useEffect(() => { void readerSettingsRepository.loadGlobal().then(value => setSettings(current => ({ ...current, ...value }))).catch(console.warn); }, []);
-  const update = (key: keyof ReaderPreferences, value: unknown) => { setSettings(current => ({ ...current, [key]: value })); void readerSettingsRepository.saveGlobal({ [key]: value } as ReaderPreferences).catch(console.warn); };
-  const directionLabel = settings.readingDirection === 'rtl' ? '从右到左' : settings.readingDirection === 'vertical' ? '从上到下' : '从左到右';
-  const setDirection = (label: string) => update('readingDirection', label === '从右到左' ? 'rtl' : label === '从上到下' ? 'vertical' : 'ltr');
-  const Option = ({ values, value, onChange }: { values: string[]; value: string; onChange: (value: string) => void }) => <View style={[styles.segment, isDark && uiStyles.segmentDark]}>{values.map(item => <Pressable key={item} onPress={() => onChange(item)} style={[styles.segmentItem, value === item && styles.segmentActive, isDark && value === item && uiStyles.segmentActiveDark]}><Text style={[styles.segmentText, value === item && styles.segmentTextActive, isDark && value !== item && uiStyles.segmentTextDark]}>{item}</Text></Pressable>)}</View>;
-  return <SafeAreaView style={[styles.safe, isDark && styles.safeDark]}><ScrollView contentContainerStyle={[styles.page, isDark && styles.pageDark]}><View style={[styles.header, layoutStyles.subpageHeader]}><IconButton name="chevron-back" label="返回我的" onPress={back} /><Text style={[styles.navTitle, isDark && styles.textPrimaryDark]}>全局阅读设置</Text><View style={pageLayoutStyles.headerSpacer} /></View><Text style={[styles.meta, isDark && styles.textMutedDark]}>这些设置会作为每本书的默认值；书籍内的单独设置优先。</Text><Text style={[styles.settingSection, isDark && uiStyles.settingSectionDark]}>阅读方向</Text><Option values={['从左到右', '从右到左', '从上到下']} value={directionLabel} onChange={setDirection} /><Text style={[styles.settingSection, isDark && uiStyles.settingSectionDark]}>翻页效果</Text><Option values={['直接翻页', '平滑翻页']} value={settings.smooth ? '平滑翻页' : '直接翻页'} onChange={value => update('smooth', value === '平滑翻页')} /><Text style={[styles.settingSection, isDark && uiStyles.settingSectionDark]}>页面布局</Text><Option values={['单页', '双页']} value={settings.pageMode === 'double' ? '双页' : '单页'} onChange={value => update('pageMode', value === '双页' ? 'double' : 'single')} />{settings.pageMode === 'double' && <><Text style={[styles.settingSection, isDark && uiStyles.settingSectionDark]}>双页顺序</Text><Option values={['奇数在前', '偶数在前']} value={settings.doubleOrder === 'reverse' ? '偶数在前' : '奇数在前'} onChange={value => update('doubleOrder', value === '偶数在前' ? 'reverse' : 'natural')} /></>}<View style={[styles.toggleRow, isDark && uiStyles.toggleRowDark]}><Text style={[styles.toggleText, isDark && uiStyles.toggleTextDark]}>自动裁切白边</Text><Switch value={Boolean(settings.crop)} onValueChange={value => update('crop', value)} trackColor={{ true: '#765BE8' }} /></View><View style={[styles.toggleRow, isDark && uiStyles.toggleRowDark]}><Text style={[styles.toggleText, isDark && uiStyles.toggleTextDark]}>点击区域翻页</Text><Switch value={settings.tapZones !== false} onValueChange={value => update('tapZones', value)} trackColor={{ true: '#765BE8' }} /></View><View style={[styles.toggleRow, isDark && uiStyles.toggleRowDark]}><Text style={[styles.toggleText, isDark && uiStyles.toggleTextDark]}>黑色阅读背景</Text><Switch value={settings.dark !== false} onValueChange={value => update('dark', value)} trackColor={{ true: '#765BE8' }} /></View><View style={[styles.toggleRow, isDark && uiStyles.toggleRowDark]}><Text style={[styles.toggleText, isDark && uiStyles.toggleTextDark]}>刘海区域显示内容</Text><Switch value={Boolean(settings.notch)} onValueChange={value => update('notch', value)} trackColor={{ true: '#765BE8' }} /></View><View style={[styles.toggleRow, isDark && uiStyles.toggleRowDark]}><Text style={[styles.toggleText, isDark && uiStyles.toggleTextDark]}>音量键翻页</Text><Switch accessibilityLabel="音量键翻页" value={settings.volume !== false} onValueChange={value => update('volume', value)} trackColor={{ true: '#765BE8' }} /></View></ScrollView></SafeAreaView>;
+export function CacheSettings({ back }: { back: () => void }) {
+  const { tokens } = useTheme();
+  const [usage, setUsage] = useState<CacheBreakdown>();
+  const [pageLimit, setPageLimit] = useState('');
+  const [sourceLimit, setSourceLimit] = useState('');
+  const [ready, setReady] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const mounted = useRef(true);
+  const refresh = async () => { const next = await cacheManager.getBreakdown(); if (mounted.current) setUsage(next); };
+  useEffect(() => {
+    mounted.current = true;
+    Promise.all([refresh(), cacheManager.getPageLimitMb(), cacheManager.getSourceLimitMb()]).then(([, page, source]) => {
+      if (mounted.current) { setPageLimit(String(page)); setSourceLimit(String(source)); setReady(true); }
+    }).catch(reason => { if (mounted.current) setError(String(reason)); });
+    const sub = AppState.addEventListener('change', state => { if (state === 'active') void refresh().catch(reason => setError(String(reason))); });
+    return () => { mounted.current = false; sub.remove(); };
+  }, []);
+  const valid = (s: string, min: number, max: number) => /^\d+$/.test(s) && Number(s) >= min && Number(s) <= max;
+  const pageError = ready && !valid(pageLimit, 16, 4096) ? '请输入 16–4096 MB 的整数' : undefined;
+  const sourceError = ready && !valid(sourceLimit, 128, 8192) ? '请输入 128–8192 MB 的整数' : undefined;
+  const run = async (work: () => Promise<unknown>, success: string) => {
+    if (busy) return;
+    setBusy(true); setError(''); setMessage('');
+    try { await work(); await refresh(); setMessage(success); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); await refresh().catch(() => undefined); }
+    finally { setBusy(false); }
+  };
+  const save = () => run(async () => {
+    await cacheManager.setPageLimitMb(Number(pageLimit));
+    await cacheManager.setSourceLimitMb(Number(sourceLimit));
+  }, '缓存上限已保存');
+  const clear = (kind: CacheKind) => run(() => cacheManager.clear(kind), '清理完成；正在使用的文件会保留。');
+  return <Screen scroll><ScreenHeader title="缓存" back={back} />
+    <SettingsGroup>
+      <SettingsRow title="总占用" value={usage ? formatCacheSize(usage.total) : '计算中…'} />
+      <SettingsRow title="页面缓存" value={usage ? formatCacheSize(usage.page) : '—'} />
+      <SettingsRow title="远程源文件" value={usage ? formatCacheSize(usage.source) : '—'} />
+      <SettingsRow title="临时封面与其他" value={usage ? formatCacheSize(usage.cover + usage.other + usage.session) : '—'} />
+    </SettingsGroup>
+    <TextField label="页面缓存上限（MB）" value={pageLimit} onChangeText={setPageLimit} keyboardType="number-pad" editable={ready && !busy} error={pageError} />
+    <TextField label="远程源文件上限（MB）" value={sourceLimit} onChangeText={setSourceLimit} keyboardType="number-pad" editable={ready && !busy} error={sourceError} />
+    <Text style={[tokens.typography.caption, { color: tokens.colors.mutedText, marginBottom: 16 }]}>保存后按上限清理缓存。正在阅读的文件暂时保留，关闭后再回收。</Text>
+    <View style={{ gap: 12 }}>
+      <Button label="保存缓存上限" onPress={save} disabled={!ready || !!pageError || !!sourceError || busy} />
+      <Button label="清理页面缓存" icon="trash-outline" variant="danger" onPress={() => clear('page')} disabled={busy} />
+      <Button label="清理远程源文件" icon="cloud-download-outline" variant="danger" onPress={() => clear('source')} disabled={busy} />
+    </View>
+    {busy && <ActivityIndicator color={tokens.colors.primary} style={{ marginTop: 16 }} />}
+    {!!(error || message) && <Text accessibilityLiveRegion="polite" style={[tokens.typography.body, { color: error ? tokens.colors.danger : tokens.colors.mutedText, marginTop: 16 }]}>{error || message}</Text>}
+  </Screen>;
 }
 
-function CacheSettings({ back }: { back: () => void }) {
-  const { isDark } = useTheme();
-  const [size, setSize] = useState(0); const [sourceSize, setSourceSize] = useState(0); const [sessionSize, setSessionSize] = useState(0); const [coverSize, setCoverSize] = useState(0); const [otherSize, setOtherSize] = useState(0); const [limit, setLimit] = useState('512'); const [limitReady, setLimitReady] = useState(false); const [loading, setLoading] = useState(false);
-  const mounted = useRef(true); const refreshInFlight = useRef<Promise<void>>();
-  const refresh = (force = false): Promise<void> => { if (refreshInFlight.current) return force ? refreshInFlight.current.then(() => refresh(false)) : refreshInFlight.current; const task = cacheManager.getBreakdown().then(({ page, source, session, cover, other }) => { if (mounted.current) { setSize(page); setSourceSize(source); setSessionSize(session); setCoverSize(cover); setOtherSize(other); } }).catch(console.warn).finally(() => { refreshInFlight.current = undefined; }); refreshInFlight.current = task; return task; };
-  useEffect(() => { void refresh(); const subscription = AppState.addEventListener('change', state => { if (state === 'active') void refresh(true); }); cacheManager.getPageLimitMb().then(value => { if (mounted.current) { setLimit(String(value)); setLimitReady(true); } }).catch(console.warn); return () => { mounted.current = false; subscription.remove(); }; }, []);
-  useEffect(() => { if (!limitReady) return; const value = Number.parseInt(limit, 10); if (!Number.isFinite(value)) return; const timer = setTimeout(() => { setLoading(true); cacheManager.setPageLimitMb(value).then(saved => setLimit(String(saved))).then(() => refresh(true)).catch(console.warn).finally(() => setLoading(false)); }, 500); return () => clearTimeout(timer); }, [limit, limitReady]);
-  const clear = async () => { setLoading(true); try { if (refreshInFlight.current) await refreshInFlight.current; await cacheManager.clear('page'); await refresh(true); } catch (reason) { Alert.alert('清理未完成', reason instanceof Error ? reason.message : String(reason)); await refresh(true); } finally { setLoading(false); } };
-  const clearSources = async () => { setLoading(true); try { if (refreshInFlight.current) await refreshInFlight.current; await cacheManager.clear('source'); await refresh(true); } catch (reason) { Alert.alert('清理未完成', reason instanceof Error ? reason.message : String(reason)); await refresh(true); } finally { setLoading(false); } };
-  return <SafeAreaView style={[styles.safe, isDark && styles.safeDark]}><ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={[styles.page, isDark && styles.pageDark]}><View style={[styles.header, layoutStyles.subpageHeader]}><IconButton name="chevron-back" onPress={back} /><Text style={[styles.navTitle, isDark && styles.textPrimaryDark]}>缓存</Text><View style={{ width: 42 }} /></View><View style={[styles.cacheCard, isDark && styles.cardDark]}><Ionicons name="cube-outline" size={34} color="#7257E7" /><Text style={[styles.cacheValue, isDark && styles.textPrimaryDark]}>{formatCacheSize(size + sourceSize + sessionSize + coverSize + otherSize)}</Text><Text style={[styles.meta, isDark && styles.textMutedDark]}>页面 {formatCacheSize(size)} · 源文件 {formatCacheSize(sourceSize)}</Text><Text style={[styles.meta, isDark && styles.textMutedDark]}>阅读会话 {formatCacheSize(sessionSize)} · 封面 {formatCacheSize(coverSize)} · 其他 {formatCacheSize(otherSize)}</Text></View><View style={[styles.settingsGroup, isDark && styles.cardDark]}><View style={[styles.cacheRow, layoutStyles.cacheRowCentered]}><Text style={[styles.settingLabel, layoutStyles.cacheLabel, isDark && styles.textPrimaryDark]}>页面缓存上限</Text><View style={styles.cacheLimitInput}><TextInput value={limit} onChangeText={setLimit} keyboardType="number-pad" selectionColor={isDark ? '#B9A5FF' : '#7257E7'} placeholderTextColor={isDark ? '#B8B1C2' : '#99939E'} style={[styles.cacheInput, layoutStyles.cacheInputCentered, isDark && uiStyles.cacheInputDark]} /><Text style={[styles.meta, isDark && styles.textMutedDark]}>MB</Text></View></View></View><Pressable style={[styles.dangerButton, isDark && uiStyles.dangerButtonDark, loading && { opacity: .55 }]} disabled={loading} onPress={clear}><Ionicons name="trash-outline" size={19} color={isDark ? '#F5A9B7' : '#C84459'} /><Text style={[styles.dangerText, isDark && uiStyles.dangerTextDark]}>清理页面缓存</Text></Pressable><Pressable style={[styles.dangerButton, isDark && uiStyles.dangerButtonDark, loading && { opacity: .55, marginTop: 10 }]} disabled={loading} onPress={clearSources}><Ionicons name="cloud-download-outline" size={19} color={isDark ? '#F5A9B7' : '#C84459'} /><Text style={[styles.dangerText, isDark && uiStyles.dangerTextDark]}>清理远程源文件</Text></Pressable></ScrollView></SafeAreaView>;
+export function SettingsPage({ back }: { screen: AppScreen; back: () => void }) {
+  const { tokens } = useTheme();
+  return <Screen scroll><ScreenHeader title="关于 Veader" back={back} /><Card>
+    <Ionicons name="book-outline" size={40} color={tokens.colors.primary} />
+    <Text style={[tokens.typography.pageTitle, { color: tokens.colors.text, marginTop: 16 }]}>Veader</Text>
+    <Text style={[tokens.typography.caption, { color: tokens.colors.mutedText, marginVertical: 12 }]}>版本 {Constants.expoConfig?.version ?? '—'} · {Platform.OS === 'ios' ? 'iOS' : 'Android'}</Text>
+    <Text style={[tokens.typography.body, { color: tokens.colors.text }]}>本地优先的漫画与电子书阅读器。支持 EPUB、MOBI、PDF 导入及本机阅读记录。</Text>
+  </Card></Screen>;
 }
-
-function SettingsPage({ screen, back }: { screen: Screen; back: () => void }) {
-  const titles: Partial<Record<Screen, string>> = { about: '关于 Veader' };
-  const { isDark } = useTheme();
-  return <SafeAreaView style={[styles.safe, isDark && styles.safeDark]}><ScrollView contentContainerStyle={[styles.page, isDark && styles.pageDark]}><View style={[styles.header, layoutStyles.subpageHeader]}><IconButton name="chevron-back" onPress={back} /><Text style={[styles.navTitle, isDark && styles.textPrimaryDark]}>{titles[screen]}</Text><View style={{ width: 42 }} /></View>
-    <View style={[styles.aboutCard, isDark && styles.cardDark]}><View style={styles.aboutLogo}><Ionicons name="book" size={38} color="#fff" /></View><Text style={[styles.detailTitle, isDark && styles.textPrimaryDark]}>Veader</Text><Text style={[styles.meta, isDark && styles.textMutedDark]}>版本 0.1.0 · Android 测试版</Text><Text style={[styles.modalHelp, isDark && styles.textMutedDark]}>本地优先的漫画与电子书阅读器。支持 EPUB、MOBI、PDF 导入及本机阅读记录。</Text></View>
-  </ScrollView></SafeAreaView>;
-}
-
-export { Me, CacheSettings, SettingsPage, ReaderSettingsPage };
