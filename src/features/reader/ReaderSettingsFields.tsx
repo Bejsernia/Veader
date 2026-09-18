@@ -1,5 +1,6 @@
+import { Toggle } from '../../ui/components/toggle';
 import React from 'react';
-import { Switch,Text,View } from 'react-native';
+import { Text,View } from 'react-native';
 import type { ReaderPreferences } from '../../preferences';
 import { SegmentedControl } from '../../ui/components/segmented-control';
 import { SettingsGroup } from '../../ui/components/settings-group';
@@ -22,6 +23,6 @@ export function ReaderSettingsFields({ value, onChange }: { value: ReaderPrefere
     <SegmentedControl label="翻页效果" value={value.smooth !== false ? 'smooth' : 'direct'} options={[{ value: 'direct', label: '直接翻页' }, { value: 'smooth', label: '平滑翻页' }]} onChange={v => onChange({ smooth: v === 'smooth' })} />
     <SegmentedControl label="页面布局" value={value.pageMode ?? 'single'} options={[{ value: 'single', label: '单页' }, { value: 'double', label: '双页' }]} onChange={pageMode => onChange({ pageMode })} />
     {value.pageMode === 'double' && <SegmentedControl label="双页顺序" value={value.doubleOrder ?? 'natural'} options={[{ value: 'natural', label: '奇数在前' }, { value: 'reverse', label: '偶数在前' }]} onChange={doubleOrder => onChange({ doubleOrder })} />}
-    <SettingsGroup>{toggles.map(({ key, label, fallback }) => <SettingsRow key={key} title={label} control={<Switch accessibilityLabel={label} value={value[key] ?? fallback} onValueChange={v => onChange({ [key]: v })} trackColor={{ false: tokens.colors.divider, true: tokens.colors.primary }} />} />)}</SettingsGroup>
+    <SettingsGroup>{toggles.map(({ key, label, fallback }) => <SettingsRow key={key} title={label} control={<Toggle accessibilityLabel={label} value={value[key] ?? fallback} onValueChange={v => onChange({ [key]: v })} />} />)}</SettingsGroup>
   </View>;
 }

@@ -95,10 +95,8 @@ function createScreenStyles(tokens: ThemeTokens) {
     categoryOverviewDividerDark: { backgroundColor: tokens.colors.divider }
   });
   const statsChartStyles = StyleSheet.create({
-    dailyChart: { flexDirection: 'row', alignItems: 'flex-start', marginTop: 24 },
-    dailyYAxis: { ...tokens.typography.caption, width: 34, height: 152, marginRight: 8, position: 'relative' },
-    dailyAxisUnit: { ...tokens.typography.caption, position: 'absolute', top: -20, left: 0, width: 34, color: tokens.colors.mutedText, textAlign: 'right' },
-    dailyYAxisTicks: { ...tokens.typography.caption, height: 128, justifyContent: 'space-between' },
+    dailyYAxis: { width: 34, height: 152, marginRight: 8, position: 'relative' },
+    dailyYAxisTicks: { height: 128, justifyContent: 'space-between' },
     dailyAxisText: { ...tokens.typography.caption, color: tokens.colors.mutedText, textAlign: 'right' },
     dailyAxisTextDark: { ...tokens.typography.caption, color: tokens.colors.mutedText },
     dailyPlot: { height: 152 },
@@ -108,7 +106,7 @@ function createScreenStyles(tokens: ThemeTokens) {
     dailyBarsRow: { flexDirection: 'row', alignItems: 'flex-end' },
     dailyBarSlot: { height: '100%', alignItems: 'center', justifyContent: 'flex-end' },
     dailyBar: { borderRadius: 4, backgroundColor: tokens.colors.secondary },
-    dailyXAxis: { ...tokens.typography.caption, flexDirection: 'row', alignItems: 'flex-start' },
+    dailyXAxis: { flexDirection: 'row', alignItems: 'flex-start' },
     dailyXAxisLabel: { ...tokens.typography.caption, color: tokens.colors.mutedText, textAlign: 'center' }
   });
   const pageLayoutStyles = StyleSheet.create({
@@ -125,13 +123,10 @@ function createScreenStyles(tokens: ThemeTokens) {
     sourceStatusDark: { ...tokens.typography.caption, color: tokens.colors.primary },
     settingSectionDark: { color: tokens.colors.mutedText }
   });
-  const statsChartAdjustments = StyleSheet.create({
-    dailyChartInset: { marginLeft: -8 }
-  });
   const categoryUiStyles = StyleSheet.create({
     categoryDetailCount: { ...tokens.typography.caption, marginTop: 8, marginBottom: 20 }
   });
-  return { styles, categoryStyles, statsChartStyles, pageLayoutStyles, layoutStyles, uiStyles, statsChartAdjustments, categoryUiStyles };
+  return { styles, categoryStyles, statsChartStyles, pageLayoutStyles, layoutStyles, uiStyles, categoryUiStyles };
 }
 export function useScreenStyles() {
   const { tokens } = useTheme();

@@ -1,6 +1,7 @@
+import { Toggle } from '../../ui/components/toggle';
 import { Ionicons } from '@expo/vector-icons';
 import React,{ useEffect,useState } from 'react';
-import { ActivityIndicator,FlatList,Pressable,ScrollView,Switch,Text,View } from 'react-native';
+import { ActivityIndicator,FlatList,Pressable,ScrollView,Text,View } from 'react-native';
 import { Gesture,GestureDetector } from 'react-native-gesture-handler';
 import Animated,{ useAnimatedStyle,useSharedValue,withSpring } from 'react-native-reanimated';
 import { libraryRepository } from '../../data/library-repository';
@@ -35,7 +36,7 @@ export function SwipeableSourceRow({ source, isDark, onRemove, onToggle, onRenam
     <GestureDetector gesture={pan}><Animated.View style={[styles.sourceCard, layoutStyles.sourceCardInset, isDark && styles.cardDark, animatedStyle]}><PressableScale haptic="light" accessibilityRole="button" accessibilityLabel={`${source.name}，长按重命名，向左滑显示删除`} onLongPress={onRename} style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
       <View style={[styles.sourceIcon, { backgroundColor: tokens.colors.selectedContainer }]}><Ionicons name={source.type === 'local' ? 'folder' : 'server'} size={23} color={tokens.colors.onSelectedContainer} /></View>
       <View style={[styles.flex, { minWidth: 0 }]}><Text numberOfLines={2} ellipsizeMode="tail" style={[styles.rowTitle, isDark && styles.textPrimaryDark]}>{source.name}</Text><Text numberOfLines={1} ellipsizeMode="tail" style={[styles.meta, isDark && styles.textMutedDark]}>{source.type.toUpperCase()} · {source.endpoint}</Text><Text numberOfLines={1} ellipsizeMode="tail" style={[styles.sourceStatus, isDark && uiStyles.sourceStatusDark]}>{source.bookCount} 部作品 · {source.type === 'local' ? '长按重命名' : '原生协议扫描'}</Text></View>
-    </PressableScale><Switch accessibilityLabel={`启用 ${source.name}`} value={source.enabled} onValueChange={onToggle} trackColor={{ true: tokens.colors.primary }} /></Animated.View></GestureDetector>
+    </PressableScale><Toggle accessibilityLabel={`启用 ${source.name}`} value={source.enabled} onValueChange={onToggle} /></Animated.View></GestureDetector>
   </View>;
 }
 

@@ -68,28 +68,32 @@ function displayDateLabel(label: string, range: ReadingStatsRange) {
 }
 
 function DailyBars({ summary, isDark }: { summary: ReadingStatsSummary; isDark: boolean }) {
-  const { styles, statsChartStyles, statsChartAdjustments } = useScreenStyles();
-  const { width } = useWindowDimensions();
+  const { styles, statsChartStyles } = useScreenStyles();
+  const { tokens } = useTheme();
+  const [containerWidth, setContainerWidth] = useState(0);
+  const { fontScale } = useWindowDimensions();
   const rows = normalizeDailyRows(summary);
   const scale = axisScale(rows);
-  const plotViewportWidth = Math.max(180, width - 126);
-  const allTime = summary.range === 'all';
-  const plotWidth = allTime ? Math.max(plotViewportWidth, rows.length * 24) : plotViewportWidth;
+  const axisWidth = Math.max(34, 34 * fontScale);
+  const plotViewportWidth = Math.max(1, containerWidth - axisWidth - 8);
+  const minimumSlot = summary.range === '7d' ? 34 * fontScale : 24;
+  const plotWidth = Math.max(plotViewportWidth, rows.length * minimumSlot);
   const slotWidth = plotWidth / Math.max(1, rows.length);
   const barWidth = summary.range === '7d'
     ? Math.min(18, Math.max(10, slotWidth * 0.55))
     : summary.range === '30d'
       ? Math.min(7, Math.max(4, slotWidth * 0.65))
       : Math.min(16, Math.max(6, slotWidth * 0.55));
-  const scrollable = allTime && plotWidth > plotViewportWidth;
+  const scrollable = plotWidth > plotViewportWidth;
 
   if (!rows.length) return <View style={styles.empty}>
     <Text style={[styles.meta, isDark && styles.textMutedDark]}>开始阅读后这里会显示每日趋势</Text>
   </View>;
 
-  return <View style={[statsChartStyles.dailyChart, statsChartAdjustments.dailyChartInset]}>
-    <View style={statsChartStyles.dailyYAxis}>
-      <Text style={[statsChartStyles.dailyAxisUnit, isDark && statsChartStyles.dailyAxisTextDark]}>分钟</Text>
+  return <View onLayout={event => setContainerWidth(event.nativeEvent.layout.width)} style={{ marginTop: 16 }}>
+    <Text style={[tokens.typography.caption, { color: tokens.colors.mutedText, marginBottom: 8 }]}>单位：分钟</Text>
+    <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+    <View style={[statsChartStyles.dailyYAxis, { width: axisWidth }]}>
       <View style={statsChartStyles.dailyYAxisTicks}>
         {scale.ticks.map(value => <Text key={value} style={[statsChartStyles.dailyAxisText, isDark && statsChartStyles.dailyAxisTextDark]}>{axisLabel(value)}</Text>)}
       </View>
@@ -112,6 +116,7 @@ function DailyBars({ summary, isDark }: { summary: ReadingStatsSummary; isDark: 
         </View>
       </View>
     </ScrollView>
+    </View>
   </View>;
 }
 

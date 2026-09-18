@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { StyleProp,ViewStyle } from 'react-native';
-import { useTheme } from '../theme';
+import { readerAppearance, useTheme } from '../theme';
 import { HapticKind,PressableScale } from './pressable-scale';
 
 export function IconButton({ name, label, onPress, style, color, dark = false, haptic = 'light', disabled }: {
@@ -14,7 +14,7 @@ export function IconButton({ name, label, onPress, style, color, dark = false, h
   haptic?: HapticKind;
   disabled?: boolean;
 }) {
-  const { isDark, tokens } = useTheme();
+  const { tokens } = useTheme();
   return <PressableScale
     accessibilityRole="button"
     accessibilityLabel={label}
@@ -26,6 +26,6 @@ export function IconButton({ name, label, onPress, style, color, dark = false, h
     style={[{ width: 48, height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 22 }, style]}
     onPress={onPress}
   >
-    <Ionicons name={name} size={22} color={color ?? (dark || isDark ? tokens.colors.text : tokens.colors.text)} />
+    <Ionicons name={name} size={22} color={color ?? (dark ? readerAppearance.dark.text : tokens.colors.text)} />
   </PressableScale>;
 }
