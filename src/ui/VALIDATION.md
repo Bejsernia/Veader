@@ -20,3 +20,10 @@
 - The 1000-record check is an automated data/virtualization regression, not a device FPS or memory benchmark. The device contains three real works.
 - iOS has not been built or visually validated on this Windows host.
 - Existing reader/navigation/cache tests passed; this UI change does not constitute exhaustive new end-to-end verification of every format, gesture or network failure mode.
+
+## Reader seek regression (2026-09-20)
+
+- Slider preview uses its draft page. Android emits a final value-change event after sliding-complete; only the explicit sliding-start event enters dragging state, so that trailing event cannot suppress native scroll settlement.
+- Programmatic seeks retain their target until a new seek or native drag. Late offsets cannot overwrite that target; nonanimated seeks also move the list explicitly.
+- TypeScript passed; Jest: 27 suites / 80 tests. Added offset regressions for late/overlapping seeks and LTR/RTL/vertical double-page targets.
+- Rebuilt and installed the release APK. Android RTL single-page EPUB: 37 -> seek 150 (stable) -> manual swipe 151 -> seek 43 (stable) -> leave/reopen 43. Simulator remains open. Other direction/spread cases have unit coverage, not new device coverage; iOS remains unverified.
