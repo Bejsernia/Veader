@@ -34,6 +34,6 @@ export function SeriesProgress({ series, inverse = false, compact = false }: { s
 export const CompactSeriesProgress = SeriesProgress;
 
 /** Shared book entry; callers own grid sizing and navigation. */
-export function SeriesCard({ series, index, onPress }: { series: LibrarySeries; index: number; onPress: () => void }) {
-  return <BookCard title={series.title} coverUri={series.coverUri} index={index} onPress={onPress} footer={<SeriesProgress series={series} compact />} />;
+export function SeriesCard({ series, index, onPress, naturalCover = false }: { series: LibrarySeries; index: number; onPress: () => void; naturalCover?: boolean }) {
+  return <BookCard naturalCover={naturalCover} title={series.title} coverUri={series.coverUri} index={index} onPress={onPress} footer={<SeriesProgress series={series} compact />} />;
 }

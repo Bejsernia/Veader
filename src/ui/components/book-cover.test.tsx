@@ -16,3 +16,17 @@ it('shows the title for failed covers and retries when the URI changes', () => {
   screen.rerender(<BookCover title={title} style={{ width: 40 }} />);
   expect(screen.getByText(title)).toBeTruthy();
 });
+
+it('uses the actual cover ratio and resets it when a recycled cell changes books', () => {
+  const screen = render(<BookCover natural uri="file:///wide.jpg" title="横幅封面" style={{ width: 160 }} />);
+  const ratio = () => require('react-native').StyleSheet.flatten((screen.toJSON() as any).props.style).aspectRatio;
+  fireEvent(screen.UNSAFE_getByType(Image), 'load', { source: { width: 1200, height: 800 } });
+  expect(ratio()).toBe(1.5);
+  screen.rerender(<BookCover natural uri="file:///tall.jpg" title="长封面" style={{ width: 160 }} />);
+  expect(ratio()).toBe(2 / 3);
+  fireEvent(screen.UNSAFE_getByType(Image), 'load', { source: { width: 600, height: 1400 } });
+  expect(ratio()).toBe(600 / 1400);
+  fireEvent(screen.UNSAFE_getByType(Image), 'error');
+  expect(ratio()).toBe(2 / 3);
+  expect(screen.getByText('长封面')).toBeTruthy();
+});
