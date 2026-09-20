@@ -17,7 +17,7 @@ export function Screen({ children, scroll = false, safeArea = true, style, conte
     {safeArea && <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={tokens.colors.background} />}
     {scroll ? <ScrollView keyboardShouldPersistTaps="handled" {...scrollProps} contentContainerStyle={[{
       padding: tokens.spacing.lg, paddingHorizontal: getGridLayout(width).pageInset,
-      paddingBottom: tokens.spacing.xxl, width: '100%', maxWidth: 960, alignSelf: 'center',
+      paddingBottom: tokens.spacing.xxl, width: '100%', maxWidth: 640, alignSelf: 'center',
     }, contentStyle]}>{children}</ScrollView> : children}
   </Container>;
 }

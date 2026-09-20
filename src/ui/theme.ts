@@ -20,7 +20,7 @@ export type ThemeTokens = {
     onSelectedContainer: string;
     dangerContainer: string;
   };
-  typography: Record<'pageTitle' | 'sectionTitle' | 'body' | 'label' | 'caption', TextStyle>;
+  typography: Record<'pageTitle' | 'sectionTitle' | 'body' | 'label' | 'caption' | 'bookTitle', TextStyle>;
   spacing: Record<'xs' | 'sm' | 'md' | 'lg' | 'xl' | 'xxl', number>;
   radius: Record<'sm' | 'md' | 'lg' | 'xl' | 'pill', number>;
   motion: {
@@ -32,27 +32,28 @@ export type ThemeTokens = {
 };
 
 const spacing = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 } as const;
-const radius = { sm: 10, md: 14, lg: 18, xl: 26, pill: 999 } as const;
+const radius = { sm: 6, md: 12, lg: 12, xl: 20, pill: 999 } as const;
 const motion = { fast: 160, normal: 220, emphasis: 360, stagger: 48 } as const;
 
 export const typography: ThemeTokens['typography'] = {
-  pageTitle: { fontSize: 28, lineHeight: 36, fontWeight: '800' },
-  sectionTitle: { fontSize: 19, lineHeight: 26, fontWeight: '700' },
-  body: { fontSize: 15, lineHeight: 23, fontWeight: '400' },
+  pageTitle: { fontSize: 24, lineHeight: 32, fontWeight: '600' },
+  sectionTitle: { fontSize: 18, lineHeight: 26, fontWeight: '600' },
+  body: { fontSize: 15, lineHeight: 22, fontWeight: '400' },
   label: { fontSize: 15, lineHeight: 21, fontWeight: '600' },
+  bookTitle: { fontSize: 14, lineHeight: 20, fontWeight: '600' },
   caption: { fontSize: 12, lineHeight: 18, fontWeight: '400' },
 };
 export const darkTokens: ThemeTokens = {
   colors: {
-    background: '#0F0E14',
-    surface: '#17151F',
-    elevated: '#211C2E',
-    text: '#F8F5FF',
-    mutedText: '#B7AEC5',
+    background: '#111113',
+    surface: '#1C1C20',
+    elevated: '#252529',
+    text: '#F1F1F3',
+    mutedText: '#A6A6AF',
     primary: '#A78BFA',
     secondary: '#55D6C2',
     accent: '#FFB86B',
-    divider: '#332B42',
+    divider: '#303036',
     danger: '#FF7185',
     onPrimary: '#181225',
     scrim: 'rgba(0,0,0,0.58)',
@@ -66,15 +67,15 @@ export const darkTokens: ThemeTokens = {
 
 export const lightTokens: ThemeTokens = {
   colors: {
-    background: '#F5F3F8',
+    background: '#F7F7F8',
     surface: '#FFFFFF',
-    elevated: '#F0EBFF',
-    text: '#211D29',
-    mutedText: '#716A7C',
+    elevated: '#EFEFF2',
+    text: '#232326',
+    mutedText: '#68686F',
     primary: '#7052E8',
     secondary: '#0F8F83',
     accent: '#C56B1C',
-    divider: '#E3DFEA',
+    divider: '#E4E4E8',
     danger: '#C63F58',
     onPrimary: '#FFFFFF',
     scrim: 'rgba(0,0,0,0.52)',
@@ -139,6 +140,6 @@ export function useTheme() {
 
 // Reading controls follow the canvas preference; sheets follow the app theme.
 export const readerAppearance = {
-  dark: { canvas: '#09090B', overlay: 'rgba(8,8,10,0.94)', text: '#FFFFFF', muted: '#B7AEC5', track: '#55515B', accent: '#A78BFA' },
-  light: { canvas: '#FFFFFF', overlay: 'rgba(248,247,250,0.96)', text: '#211D29', muted: '#716A7C', track: '#D0CBD8', accent: '#7052E8' },
+  dark: { canvas: '#09090B', overlay: 'rgba(8,8,10,0.94)', text: '#FFFFFF', muted: '#A6A6AF', track: '#55515B', accent: '#A78BFA' },
+  light: { canvas: '#FFFFFF', overlay: 'rgba(248,247,250,0.96)', text: '#232326', muted: '#68686F', track: '#D0CBD8', accent: '#7052E8' },
 } as const;
