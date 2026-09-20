@@ -37,3 +37,18 @@ describe('normalizeDailyRows', () => {
     expect(rows[0]!.key).toBe('2026-01-01');
   });
 });
+import { currentWeekRows } from './chart-utils';
+
+it('starts the weekly preview on Monday and excludes the preceding week', () => {
+  const rows = currentWeekRows([
+    { key: '2026-09-13', label: '9/13', durationMs: 120000, pages: 2 },
+    { key: '2026-09-14', label: '9/14', durationMs: 60000, pages: 1 },
+  ], new Date(2026, 8, 16));
+  expect(rows.map(row => row.key)).toEqual(['2026-09-14', '2026-09-15', '2026-09-16', '2026-09-17', '2026-09-18', '2026-09-19', '2026-09-20']);
+  expect(rows.reduce((sum, row) => sum + row.durationMs, 0)).toBe(60000);
+  expect(rows[6]).toMatchObject({ label: '周日', durationMs: 0 });
+});
+it('keeps Sunday in the current week and handles a year boundary', () => {
+  expect(currentWeekRows([], new Date(2026, 8, 20))[0]!.key).toBe('2026-09-14');
+  expect(currentWeekRows([], new Date(2026, 0, 1))[0]!.key).toBe('2025-12-29');
+});

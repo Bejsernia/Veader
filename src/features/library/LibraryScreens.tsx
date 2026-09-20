@@ -1,3 +1,5 @@
+import { DailyBars } from '../stats/daily-bars';
+import { currentWeekRows } from '../stats/chart-utils';
 import React,{ useEffect,useState } from 'react';
 import { Alert,BackHandler,FlatList,ScrollView,SectionList,Text,View,useWindowDimensions } from 'react-native';
 import { tagRepository } from '../../data/tag-repository';
@@ -123,7 +125,15 @@ function SeriesDetail({ series, chapters: seriesChapters, back, openChapter, con
 const formatMinutes = formatReadingDuration;
 
 function StatsSummaryCard({ summary, onPress }: { summary: ReadingStatsSummary; onPress: () => void; isDark: boolean }) {
-  return <SettingsRow title="阅读统计" description={'最近 7 天 · ' + formatMinutes(summary.totalDurationMs) + ' · ' + summary.totalPages + ' 页'} onPress={onPress} />;
+  const { tokens, isDark } = useTheme();
+  const total = currentWeekRows(summary.daily).reduce((sum, row) => sum + row.durationMs, 0);
+  return <View style={{ backgroundColor: tokens.colors.surface, borderRadius: 12, padding: 16 }}>
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+      <View><Text style={[tokens.typography.caption, { color: tokens.colors.mutedText }]}>本周阅读</Text><Text style={[tokens.typography.sectionTitle, { color: tokens.colors.text, marginTop: 4 }]}>{formatMinutes(total)}</Text></View>
+      <Button label="阅读统计 ›" variant="ghost" onPress={onPress} style={{ paddingHorizontal: 8 }} />
+    </View>
+    <DailyBars summary={summary} isDark={isDark} compact />
+  </View>;
 }
 
 function Recent({ series, openSeries, clearHistory, statsSummary, openStats }: { series: LibrarySeries[]; openSeries: (value: LibrarySeries) => void; clearHistory: (id: number) => void; statsSummary?: ReadingStatsSummary; openStats: () => void }) {
