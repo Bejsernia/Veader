@@ -8,10 +8,10 @@ import { CacheBreakdown,CacheKind,cacheManager } from '../../data/cache-manager'
 import { readerSettingsRepository } from '../../data/reader-settings-repository';
 import type { ReaderPreferences } from '../../preferences';
 import { Button } from '../../ui/components/button';
-import { Card } from '../../ui/components/card';
+import { ChoiceField } from '../../ui/components/choice-field';
 import { Screen } from '../../ui/components/screen';
 import { ScreenHeader } from '../../ui/components/screen-header';
-import { SegmentedControl } from '../../ui/components/segmented-control';
+import { SectionHeader } from '../../ui/components/section-header';
 import { SettingsGroup } from '../../ui/components/settings-group';
 import { SettingsRow } from '../../ui/components/settings-row';
 import { TextField } from '../../ui/components/text-field';
@@ -20,15 +20,15 @@ import { ReaderSettingsFields } from '../reader/ReaderSettingsFields';
 
 export function Me({ navigate }: { navigate: (screen: AppScreen) => void }) {
   const { mode, setMode, tokens } = useTheme();
-  const links: { icon: keyof typeof Ionicons.glyphMap; title: string; screen: AppScreen }[] = [
-    { icon: 'folder-open-outline', title: '漫画源', screen: 'sources' },
-    { icon: 'cube-outline', title: '缓存', screen: 'cache' },
-    { icon: 'options-outline', title: '阅读设置', screen: 'readerSettings' },
-    { icon: 'information-circle-outline', title: '关于 Veader', screen: 'about' },
-  ];
-  return <Screen safeArea={false} scroll><ScreenHeader title="我的" />
-    <SettingsGroup>{links.map(link => <SettingsRow key={link.screen} title={link.title} icon={<Ionicons name={link.icon} size={22} color={tokens.colors.primary} />} onPress={() => navigate(link.screen)} />)}</SettingsGroup>
-    <SegmentedControl label="界面主题" value={mode} onChange={setMode} options={[{ value: 'system', label: '跟随系统' }, { value: 'light', label: '浅色' }, { value: 'dark', label: '深色' }]} />
+  return <Screen safeArea={false} scroll><ScreenHeader title="设置" />
+    <SectionHeader title="内容与存储" />
+    <SettingsGroup><SettingsRow title="漫画源" description="本地文件夹与远程目录" onPress={() => navigate('sources')} /><SettingsRow title="缓存" onPress={() => navigate('cache')} /></SettingsGroup>
+    <SectionHeader title="阅读" />
+    <SettingsGroup><SettingsRow title="阅读设置" description="翻页、页面显示与操作方式" onPress={() => navigate('readerSettings')} /></SettingsGroup>
+    <SectionHeader title="外观" />
+    <SettingsGroup><ChoiceField label="界面主题" value={mode} onChange={setMode} options={[{ value: 'system', label: '跟随系统' }, { value: 'light', label: '浅色' }, { value: 'dark', label: '深色' }]} /></SettingsGroup>
+    <SectionHeader title="关于" />
+    <SettingsGroup><SettingsRow title="关于 Veader" onPress={() => navigate('about')} /></SettingsGroup>
   </Screen>;
 }
 
@@ -89,12 +89,12 @@ export function CacheSettings({ back }: { back: () => void }) {
       <SettingsRow title="远程源文件" value={usage ? formatCacheSize(usage.source) : '—'} />
       <SettingsRow title="临时封面与其他" value={usage ? formatCacheSize(usage.cover + usage.other + usage.session) : '—'} />
     </SettingsGroup>
-    <TextField label="页面缓存上限（MB）" value={pageLimit} onChangeText={setPageLimit} keyboardType="number-pad" editable={ready && !busy} error={pageError} />
+    <SectionHeader title="缓存额度" /><TextField label="页面缓存上限（MB）" value={pageLimit} onChangeText={setPageLimit} keyboardType="number-pad" editable={ready && !busy} error={pageError} />
     <TextField label="远程源文件上限（MB）" value={sourceLimit} onChangeText={setSourceLimit} keyboardType="number-pad" editable={ready && !busy} error={sourceError} />
     <Text style={[tokens.typography.caption, { color: tokens.colors.mutedText, marginBottom: 16 }]}>保存后按上限清理缓存。正在阅读的文件暂时保留，关闭后再回收。</Text>
     <View style={{ gap: 12 }}>
       <Button label="保存缓存上限" onPress={save} disabled={!ready || !!pageError || !!sourceError || busy} />
-      <Button label="清理页面缓存" icon="trash-outline" variant="danger" onPress={() => clear('page')} disabled={busy} />
+      <SectionHeader title="清理" /><Button label="清理页面缓存" icon="trash-outline" variant="danger" onPress={() => clear('page')} disabled={busy} />
       <Button label="清理远程源文件" icon="cloud-download-outline" variant="danger" onPress={() => clear('source')} disabled={busy} />
     </View>
     {busy && <ActivityIndicator color={tokens.colors.primary} style={{ marginTop: 16 }} />}
@@ -104,10 +104,10 @@ export function CacheSettings({ back }: { back: () => void }) {
 
 export function SettingsPage({ back }: { screen: AppScreen; back: () => void }) {
   const { tokens } = useTheme();
-  return <Screen scroll><ScreenHeader title="关于 Veader" back={back} /><Card>
+  return <Screen scroll><ScreenHeader title="关于 Veader" back={back} /><View style={{ paddingVertical: 16 }}>
     <Ionicons name="book-outline" size={40} color={tokens.colors.primary} />
     <Text style={[tokens.typography.pageTitle, { color: tokens.colors.text, marginTop: 16 }]}>Veader</Text>
     <Text style={[tokens.typography.caption, { color: tokens.colors.mutedText, marginVertical: 12 }]}>版本 {Constants.expoConfig?.version ?? '—'} · {Platform.OS === 'ios' ? 'iOS' : 'Android'}</Text>
     <Text style={[tokens.typography.body, { color: tokens.colors.text }]}>本地优先的漫画与电子书阅读器。支持 EPUB、MOBI、PDF 导入及本机阅读记录。</Text>
-  </Card></Screen>;
+  </View></Screen>;
 }

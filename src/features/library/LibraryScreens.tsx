@@ -1,7 +1,5 @@
-import { ContinueReading } from '../shared/continue-reading';
-import { Ionicons } from '@expo/vector-icons';
 import React,{ useEffect,useState } from 'react';
-import { Alert,BackHandler,FlatList,SectionList,ScrollView,Text,View,useWindowDimensions } from 'react-native';
+import { Alert,BackHandler,FlatList,ScrollView,SectionList,Text,View,useWindowDimensions } from 'react-native';
 import { tagRepository } from '../../data/tag-repository';
 import type { LibrarySeries,LibraryTag,ReadingStatsSummary,StoredChapter } from '../../domain/models';
 import { BookCover } from '../../ui/components/book-cover';
@@ -20,8 +18,8 @@ import { TextField } from '../../ui/components/text-field';
 import { getGridLayout } from '../../ui/layout';
 import { useScreenStyles } from '../../ui/screen-styles';
 import { useTheme } from '../../ui/theme';
-import { IconButton,Progress,SeriesCard,SeriesProgress,readingPosition,compactAuthor,formatReadingDuration } from '../shared/library-ui';
-import { normalizeDailyRows } from '../stats/chart-utils';
+import { ContinueReading } from '../shared/continue-reading';
+import { IconButton,Progress,SeriesCard,compactAuthor,formatReadingDuration,readingPosition } from '../shared/library-ui';
 
 function SeriesLibrary({ series, importing, refreshLibraries, openSeries, continueSeries, openSources }: { series: LibrarySeries[]; importing: boolean; refreshLibraries: () => void; openSeries: (value: LibrarySeries) => void; continueSeries: (value: LibrarySeries) => void; openSources: () => void }) {
   const [query, setQuery] = useState('');
@@ -97,7 +95,7 @@ function SeriesDetail({ series, chapters: seriesChapters, back, openChapter, con
       data={seriesChapters}
       keyExtractor={chapter => String(chapter.id)}
       contentInsetAdjustmentBehavior="automatic"
-      contentContainerStyle={[styles.detailPage, isDark && styles.pageDark]}
+      contentContainerStyle={[styles.detailPage, isDark && styles.pageDark, { width: '100%', maxWidth: 900, alignSelf: 'center' }]}
       ListHeaderComponent={header}
       ListEmptyComponent={<EmptyState title="尚未找到章节" />}
       renderItem={({ item: chapter }) => <ChapterRow number={chapter.chapterNumber} title={chapter.chapterTitle} meta={chapter.format.toUpperCase()} progress={chapter.progress} current={chapter.id === series.currentChapterId} onPress={() => openChapter(chapter)} />}

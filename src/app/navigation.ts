@@ -10,8 +10,8 @@ export type AppTabDefinition = {
 };
 
 export const appTabs: AppTabDefinition[] = [
-  { key: 'library', label: '首页', icon: 'library' },
+  { key: 'library', label: '书架', icon: 'library' },
   { key: 'categories', label: '分类', icon: 'albums-outline' },
   { key: 'recent', label: '最近', icon: 'time' },
-  { key: 'me', label: '我的', icon: 'person' },
+  { key: 'me', label: '设置', icon: 'settings-outline' },
 ];

@@ -1,4 +1,3 @@
-import { Ionicons } from '@expo/vector-icons';
 import React,{ useEffect,useState } from 'react';
 import { ActivityIndicator,ScrollView,Text,View,useWindowDimensions } from 'react-native';
 import { statsRepository } from '../../data/stats-repository';
@@ -140,11 +139,8 @@ export function ReadingStatsScreen({ back }: { back: () => void }) {
       <ScreenHeader title="阅读统计" back={back} />
       <SegmentedControl label="统计范围" value={range} onChange={setRange} options={[{ value: '7d', label: '7天' }, { value: '30d', label: '30天' }, { value: 'all', label: '全部' }]} />
       {error ? <View><Text style={{ color: tokens.colors.danger }}>{error}</Text><Button label="重新加载统计" onPress={() => setAttempt(n => n + 1)} /></View> : loading || !summary ? <View style={uiStyles.loadingState}><ActivityIndicator color={tokens.colors.primary} /><Text style={[styles.meta, isDark && styles.textMutedDark]}>正在计算阅读数据…</Text></View> : <>
-        <View style={styles.statsOverviewGrid}>
-          <View style={[styles.statsOverviewCard, isDark && styles.cardDark]}><Ionicons name="time-outline" size={20} color={tokens.colors.primary} /><Text style={[styles.statsOverviewValue, isDark && styles.textPrimaryDark]}>{duration(summary.totalDurationMs)}</Text><Text style={[styles.meta, isDark && styles.textMutedDark]}>阅读时长</Text></View>
-          <View style={[styles.statsOverviewCard, isDark && styles.cardDark]}><Ionicons name="book-outline" size={20} color={tokens.colors.secondary} /><Text style={[styles.statsOverviewValue, isDark && styles.textPrimaryDark]}>{summary.totalPages}</Text><Text style={[styles.meta, isDark && styles.textMutedDark]}>阅读页数</Text></View>
-          <View style={[styles.statsOverviewCard, isDark && styles.cardDark]}><Ionicons name="library-outline" size={20} color={tokens.colors.primary} /><Text style={[styles.statsOverviewValue, isDark && styles.textPrimaryDark]}>{summary.bookCount}</Text><Text style={[styles.meta, isDark && styles.textMutedDark]}>阅读作品</Text></View>
-          <View style={[styles.statsOverviewCard, isDark && styles.cardDark]}><Ionicons name="checkmark-circle-outline" size={20} color={tokens.colors.accent} /><Text style={[styles.statsOverviewValue, isDark && styles.textPrimaryDark]}>{summary.completedChapterCount}</Text><Text style={[styles.meta, isDark && styles.textMutedDark]}>完成章节</Text></View>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 16, marginVertical: 16 }}>
+          {[['阅读时长', duration(summary.totalDurationMs)], ['阅读页数', String(summary.totalPages)], ['阅读作品', String(summary.bookCount)], ['完成章节', String(summary.completedChapterCount)]].map(([label, value]) => <View key={label} style={{ minWidth: 110, flexGrow: 1, paddingVertical: 8 }}><Text style={[tokens.typography.sectionTitle, { color: tokens.colors.text }]}>{value}</Text><Text style={[tokens.typography.caption, { color: tokens.colors.mutedText, marginTop: 4 }]}>{label}</Text></View>)}
         </View>
         <View style={[styles.statsPanel, isDark && styles.cardDark]}><Text style={[styles.sectionTitle, isDark && styles.textPrimaryDark]}>每日阅读时长</Text><DailyBars summary={summary} isDark={isDark} /></View>
         <View style={[styles.statsPanel, isDark && styles.cardDark]}><Text style={[styles.sectionTitle, isDark && styles.textPrimaryDark]}>按作品</Text><BarList isDark={isDark} rows={summary.byBook.map(row => ({ name: row.title, value: row.durationMs, detail: `${row.pages} 页 · ${Math.round(row.progress * 100)}%`, }))} /></View>

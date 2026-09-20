@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
-import { Text,View } from 'react-native';
+import { Text } from 'react-native';
 import type { LibrarySeries } from '../../domain/models';
 import { BookCard } from '../../ui/components/book-card';
 import { IconButton as BaseIconButton } from '../../ui/components/icon-button';

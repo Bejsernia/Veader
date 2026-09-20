@@ -1,10 +1,10 @@
-import { BookCover } from '../../ui/components/book-cover';
 import { Ionicons } from '@expo/vector-icons';
 import React,{ useEffect,useMemo,useState } from 'react';
-import { Alert,FlatList,Pressable,ScrollView,Text,View,useWindowDimensions } from 'react-native';
+import { Alert,FlatList,ScrollView,Text,View,useWindowDimensions } from 'react-native';
 import { categoryRepository } from '../../data/category-repository';
 import { tagRepository } from '../../data/tag-repository';
 import type { Category,LibrarySeries,LibraryTag } from '../../domain/models';
+import { BookCover } from '../../ui/components/book-cover';
 import { BottomSheet } from '../../ui/components/bottom-sheet';
 import { Button } from '../../ui/components/button';
 import { EmptyState } from '../../ui/components/empty-state';
