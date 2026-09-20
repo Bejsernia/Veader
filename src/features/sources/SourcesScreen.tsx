@@ -84,10 +84,10 @@ function Sources({ back, onBooksChanged }: { back: () => void; onBooksChanged: (
           <Text style={[tokens.typography.body, { color: tokens.colors.mutedText, marginBottom: 16 }]}>将打开系统目录选择器。授权后会扫描其中的 EPUB、MOBI 和 PDF。</Text>
           <Button label="选择系统文件夹" icon="folder-open-outline" onPress={chooseLocalFolder} loading={loading} />
         </> : <>
-          <SectionHeader title="连接信息" /><TextField label="显示名称" value={name} onChangeText={setName} />
+          <SectionHeader compact title="连接信息" /><TextField label="显示名称" value={name} onChangeText={setName} />
           <TextField label="用户名（可留空使用匿名）" value={username} onChangeText={setUsername} autoCapitalize="none" autoCorrect={false} />
           <TextField label="密码" value={password} onChangeText={setPassword} secureTextEntry autoCapitalize="none" />
-          <SectionHeader title="目录" /><TextField label="服务器目录" value={address} onChangeText={setAddress} autoCapitalize="none" autoCorrect={false} placeholder={kind === 'SMB' ? 'smb://服务器/共享目录' : 'ftp://服务器/目录'} />
+          <SectionHeader compact title="目录" /><TextField label="服务器目录" value={address} onChangeText={setAddress} autoCapitalize="none" autoCorrect={false} placeholder={kind === 'SMB' ? 'smb://服务器/共享目录' : 'ftp://服务器/目录'} />
           <Button label="保存漫画源" onPress={add} disabled={!name.trim() || !address.trim()} loading={loading} />
         </>}
         {!!error && <Text accessibilityLiveRegion="polite" style={[tokens.typography.body, { color: tokens.colors.danger, marginTop: 12 }]}>{error}</Text>}

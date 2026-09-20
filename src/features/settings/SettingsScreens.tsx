@@ -21,13 +21,13 @@ import { ReaderSettingsFields } from '../reader/ReaderSettingsFields';
 export function Me({ navigate }: { navigate: (screen: AppScreen) => void }) {
   const { mode, setMode, tokens } = useTheme();
   return <Screen safeArea={false} scroll><ScreenHeader title="设置" />
-    <SectionHeader title="内容与存储" />
+    <SectionHeader compact title="内容与存储" />
     <SettingsGroup><SettingsRow title="漫画源" description="本地文件夹与远程目录" onPress={() => navigate('sources')} /><SettingsRow title="缓存" onPress={() => navigate('cache')} /></SettingsGroup>
-    <SectionHeader title="阅读" />
+    <SectionHeader compact title="阅读" />
     <SettingsGroup><SettingsRow title="阅读设置" description="翻页、页面显示与操作方式" onPress={() => navigate('readerSettings')} /></SettingsGroup>
-    <SectionHeader title="外观" />
+    <SectionHeader compact title="外观" />
     <SettingsGroup><ChoiceField label="界面主题" value={mode} onChange={setMode} options={[{ value: 'system', label: '跟随系统' }, { value: 'light', label: '浅色' }, { value: 'dark', label: '深色' }]} /></SettingsGroup>
-    <SectionHeader title="关于" />
+    <SectionHeader compact title="关于" />
     <SettingsGroup><SettingsRow title="关于 Veader" onPress={() => navigate('about')} /></SettingsGroup>
   </Screen>;
 }
@@ -89,12 +89,12 @@ export function CacheSettings({ back }: { back: () => void }) {
       <SettingsRow title="远程源文件" value={usage ? formatCacheSize(usage.source) : '—'} />
       <SettingsRow title="临时封面与其他" value={usage ? formatCacheSize(usage.cover + usage.other + usage.session) : '—'} />
     </SettingsGroup>
-    <SectionHeader title="缓存额度" /><TextField label="页面缓存上限（MB）" value={pageLimit} onChangeText={setPageLimit} keyboardType="number-pad" editable={ready && !busy} error={pageError} />
+    <SectionHeader compact title="缓存额度" /><TextField label="页面缓存上限（MB）" value={pageLimit} onChangeText={setPageLimit} keyboardType="number-pad" editable={ready && !busy} error={pageError} />
     <TextField label="远程源文件上限（MB）" value={sourceLimit} onChangeText={setSourceLimit} keyboardType="number-pad" editable={ready && !busy} error={sourceError} />
     <Text style={[tokens.typography.caption, { color: tokens.colors.mutedText, marginBottom: 16 }]}>保存后按上限清理缓存。正在阅读的文件暂时保留，关闭后再回收。</Text>
     <View style={{ gap: 12 }}>
       <Button label="保存缓存上限" onPress={save} disabled={!ready || !!pageError || !!sourceError || busy} />
-      <SectionHeader title="清理" /><Button label="清理页面缓存" icon="trash-outline" variant="danger" onPress={() => clear('page')} disabled={busy} />
+      <SectionHeader compact title="清理" /><Button label="清理页面缓存" icon="trash-outline" variant="danger" onPress={() => clear('page')} disabled={busy} />
       <Button label="清理远程源文件" icon="cloud-download-outline" variant="danger" onPress={() => clear('source')} disabled={busy} />
     </View>
     {busy && <ActivityIndicator color={tokens.colors.primary} style={{ marginTop: 16 }} />}

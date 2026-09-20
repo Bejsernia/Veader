@@ -76,7 +76,7 @@ function createScreenStyles(tokens: ThemeTokens) {
     rowContent: { flex: 1, minWidth: 0 }
   });
   const layoutStyles = StyleSheet.create({
-    detailTopAligned: { marginLeft: -11, marginRight: -11 },
+    detailTopAligned: { marginLeft: 0, marginRight: 0 },
     detailAuthorSlot: { minHeight: 21, justifyContent: 'flex-start' },
     sourceCardInset: { marginRight: 0, marginBottom: 0 },
     sourceDeleteInset: { right: 0, top: 0, bottom: 0, width: 60 }
