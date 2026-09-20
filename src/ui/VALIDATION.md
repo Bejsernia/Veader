@@ -36,3 +36,12 @@
 - TypeScript passed and all 27 Jest suites / 82 tests passed, including week boundaries and zero-filled days.
 - Android inspection: default-size light bookshelf, recent chart, statistics and details; 320dp dark bookshelf/details; 2.0-font statistics and details. This exposed fixed chart-height whitespace and insufficient large-font Y-axis height; both corrected. Runtime images are ignored artifacts named `.tmp/adjust-*.png`.
 - This was targeted validation of these changes, not a rerun of the entire earlier device matrix. iOS remains unverified.
+
+## Natural-cover masonry and statistics labels (2026-09-20)
+
+- Home uses the Expo 51 compatibility-listed FlashList 1.6.4 masonry implementation. Equal-width columns flow independently; BookCover natural mode adopts the decoded image ratio. Other cover contexts retain their existing dimensions; missing/error placeholders retain a title fallback.
+- Statistics use edge-aligned outer metrics and centered inner metrics, with a two-column large-font fallback. Rankings fetch series title through the chapter relationship and render chapter titles separately, using chapter IDs as keys.
+- TypeScript and 28 Jest suites / 84 tests passed. Coverage includes image-ratio changes when cells are recycled, missing covers, identical chapter names in different works, grid breakpoints and search with 0/3/100/1000 records.
+- Android release built and installed, including the new FlashList native module. Its first build required fetching an uncached AndroidX dependency. The unchanged Reanimated native library was reused via the existing Windows build workaround.
+- Device checks: three real books in light mode, unequal cover heights and independent columns after scroll, tab return, keyboard/search-empty and back, statistics right-edge alignment and book/chapter names. Also inspected 320dp dark mode and the single-column 2.0 font-scale layout. Restored normal size/font/light mode and left the emulator open.
+- Screenshots: `.tmp/masonry-home.png`, `masonry-scroll.png`, `masonry-stats.png`, `masonry-small-dark.png`, `masonry-large-font.png`. No device-scale 1000-book FPS claim; iOS not built or tested.
