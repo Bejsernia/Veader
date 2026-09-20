@@ -99,7 +99,7 @@ export type ReadingStatsSummary = {
   completedSeriesCount: number;
   daily: Array<{ key: string; label: string; durationMs: number; pages: number }>;
   byFormat: Array<{ format: BookFormat; durationMs: number; pages: number }>;
-  byBook: Array<{ id: number; title: string; durationMs: number; pages: number; progress: number }>;
+  byBook: Array<{ id: number; title: string; chapterTitle: string; durationMs: number; pages: number; progress: number }>;
   byAuthor: Array<{ name: string; durationMs: number; pages: number }>;
   byTag: Array<{ id: number; name: string; durationMs: number; pages: number }>;
 };

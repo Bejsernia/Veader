@@ -69,7 +69,7 @@ async function getSummary(range: ReadingStatsRange): Promise<ReadingStatsSummary
   const total = await db.getFirstAsync<any>(`SELECT COALESCE(SUM(active_duration_ms), 0) AS duration_ms, COALESCE(SUM(pages_viewed), 0) AS pages, COUNT(*) AS sessions, COUNT(DISTINCT book_id) AS books FROM reading_sessions ${where}`, ...params);
   const dailyRows = await db.getAllAsync<any>(`SELECT strftime('%Y-%m-%d', started_at / 1000, 'unixepoch', 'localtime') AS day, SUM(active_duration_ms) AS duration_ms, SUM(pages_viewed) AS pages FROM reading_sessions ${where} GROUP BY day ORDER BY day`, ...params);
   const formatRows = await db.getAllAsync<any>(`SELECT c.format, SUM(rs.active_duration_ms) AS duration_ms, SUM(rs.pages_viewed) AS pages FROM reading_sessions rs JOIN chapters c ON c.id = rs.book_id ${where} GROUP BY c.format ORDER BY duration_ms DESC`, ...params);
-  const bookRows = await db.getAllAsync<any>(`SELECT c.id, c.chapter_title AS title, SUM(rs.active_duration_ms) AS duration_ms, SUM(rs.pages_viewed) AS pages, c.progress FROM reading_sessions rs JOIN chapters c ON c.id = rs.book_id ${where} GROUP BY c.id ORDER BY duration_ms DESC LIMIT 20`, ...params);
+  const bookRows = await db.getAllAsync<any>(`SELECT c.id, s.title AS title, c.chapter_title AS chapter_title, SUM(rs.active_duration_ms) AS duration_ms, SUM(rs.pages_viewed) AS pages, c.progress FROM reading_sessions rs JOIN chapters c ON c.id = rs.book_id JOIN series s ON s.id = c.series_id ${where} GROUP BY c.id ORDER BY duration_ms DESC LIMIT 20`, ...params);
   const authorRows = await db.getAllAsync<any>(`SELECT COALESCE(NULLIF(s.author, ''), '未知作者') AS name, SUM(rs.active_duration_ms) AS duration_ms, SUM(rs.pages_viewed) AS pages FROM reading_sessions rs JOIN series s ON s.id = rs.series_id ${where} GROUP BY name ORDER BY duration_ms DESC LIMIT 20`, ...params);
   const tagRows = await db.getAllAsync<any>(`SELECT t.id, t.name, SUM(rs.active_duration_ms) AS duration_ms, SUM(rs.pages_viewed) AS pages FROM reading_sessions rs JOIN (SELECT DISTINCT series_id, tag_id FROM series_tags) st ON st.series_id = rs.series_id JOIN tags t ON t.id = st.tag_id ${where} GROUP BY t.id ORDER BY duration_ms DESC LIMIT 30`, ...params);
   const completedChapters = await db.getFirstAsync<any>('SELECT COUNT(*) AS count FROM chapters WHERE progress >= 0.98');
@@ -84,7 +84,7 @@ async function getSummary(range: ReadingStatsRange): Promise<ReadingStatsSummary
     completedSeriesCount: Number(completedSeries?.count ?? 0),
     daily: dailyRows.map(row => ({ key: String(row.day), label: localDateLabel(String(row.day)), durationMs: Number(row.duration_ms ?? 0), pages: Number(row.pages ?? 0) })),
     byFormat: formatRows.map(row => ({ format: row.format, durationMs: Number(row.duration_ms ?? 0), pages: Number(row.pages ?? 0) })),
-    byBook: bookRows.map(row => ({ id: Number(row.id), title: String(row.title), durationMs: Number(row.duration_ms ?? 0), pages: Number(row.pages ?? 0), progress: Number(row.progress ?? 0) })),
+    byBook: bookRows.map(row => ({ id: Number(row.id), title: String(row.title), chapterTitle: String(row.chapter_title), durationMs: Number(row.duration_ms ?? 0), pages: Number(row.pages ?? 0), progress: Number(row.progress ?? 0) })),
     byAuthor: authorRows.map(row => ({ name: String(row.name), durationMs: Number(row.duration_ms ?? 0), pages: Number(row.pages ?? 0) })),
     byTag: tagRows.map(row => ({ id: Number(row.id), name: String(row.name), durationMs: Number(row.duration_ms ?? 0), pages: Number(row.pages ?? 0) })),
   };
