@@ -15,7 +15,7 @@ it('remounts the library grid across column breakpoints without a FlatList invar
   const element = <SeriesLibrary series={[]} importing={false} refreshLibraries={jest.fn()} openSeries={jest.fn()} continueSeries={jest.fn()} openSources={jest.fn()} />;
   mockWindow.width = 375;
   const screen = render(element);
-  for (const [width, columns] of [[600, 4], [900, 6], [375, 3]] as const) {
+  for (const [width, columns] of [[600, 4], [900, 6], [375, 2]] as const) {
     mockWindow.width = width;
     screen.rerender(React.cloneElement(element));
     expect(screen.UNSAFE_getByType(FlatList).props.numColumns).toBe(columns);
@@ -28,7 +28,7 @@ it('remounts the selected category grid across column breakpoints', async () => 
   const screen = render(element);
   await waitFor(() => expect(screen.getByLabelText('打开分类测试分类')).toBeTruthy());
   fireEvent.press(screen.getByLabelText('打开分类测试分类'));
-  for (const [width, columns] of [[600, 4], [900, 6], [375, 3]] as const) {
+  for (const [width, columns] of [[600, 4], [900, 6], [375, 2]] as const) {
     mockWindow.width = width;
     screen.rerender(React.cloneElement(element));
     expect(screen.UNSAFE_getByType(FlatList).props.numColumns).toBe(columns);

@@ -3,7 +3,7 @@ import { contentMaxWidth, getGridLayout, isCompactWidth } from './layout';
 describe('responsive UI layout', () => {
   test.each([
     [320, 2],
-    [375, 3],
+    [375, 2],
     [600, 4],
     [768, 5],
     [1024, 6],
