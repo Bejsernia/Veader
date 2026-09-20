@@ -1,12 +1,12 @@
-# Veader UI conventions
+# Veader: a cover-first personal library
 
-Preserve the purple identity and let book covers carry the visual emphasis. App navigation follows the selected app theme; the reading canvas has its own black/white preference. Reader sheets follow the app theme.
+The primary tasks are finding a book and resuming reading. Keep the existing purple identity in actions and selections, with neutral surfaces. The reader canvas remains independent of the app theme. Reference composition: Android content structure / Material 3; reading workflows: Mihon and Kobo. The approved baseline is design-preview.html (six static light/dark views; example progress is not user data).
 
-- Source of truth: theme.ts. Use semantic colors and typography roles; no per-screen palettes. Spacing uses 4/8/12/16/24/32.
-- Screen owns safe areas for standalone pages. Tab content uses safeArea=false because AppShell owns the inset. Lists keep virtualization and use getGridLayout for gutters and column widths.
-- ScreenHeader owns page/back titles. SectionHeader owns section labels. SettingsGroup and SettingsRow compose navigation, descriptions and sibling controls; do not nest independent controls in PressableScale.
-- Button, IconButton and SegmentedControl own 48-point targets and accessible states. Inputs use TextField with a persistent label. Drafts with destructive consequences require an explicit save.
-- BottomSheet owns the modal, Android back, keyboard avoidance, safe areas and reduced motion. Put long forms in a ScrollView with keyboardShouldPersistTaps=handled; keep virtualized chapter lists as FlatList.
-- BookCover owns image loading/failure placeholders. BookCard composes a grid entry. ProgressBar is shared; chapter progress and reading statistics retain separate meanings.
-- ReaderSettingsFields is shared by global defaults and per-book settings; persistence remains owned by each caller.
-- Validate light/dark, compact/wide, large text, empty states, keyboard and reader transitions after changes. Do not change SDK or navigation architecture as part of visual work.
+- System type: page 24/32 600; section 18/26 600; body 15/22; book title 14/20 600; caption 12/18. Support system font scaling.
+- Spacing: 4/8/12/16/24/32. Cover radius 6; ordinary containers 12; sheets 20. Covers use a 2:3 frame, contain fit, neutral backing and a title fallback.
+- Library grid: 2 columns below 360dp, 3 below 600dp; wider layouts derive columns from minimum 120dp covers, maximum 6 and 1100dp content. Reduce columns for large text. Forms cap at 640dp.
+- Compact continue-reading row; cards show cover, two-line title and a reading-position summary. Never present chapter position as completion or duplicate chapter/page progress bars. Detail may show one current-chapter progress bar.
+- Navigation: 书架 / 分类 / 最近 / 设置. Preserve route keys and data. Management actions belong in labeled menus. History precedes analytics. Group settings by purpose; choices open a selected-value panel.
+- Reuse Screen, ScreenHeader, BookCover, BookCard, SettingsRow/Group, ChoiceField, BottomSheet and reading summaries. Callers own persistence. Keep virtualized grids and chapter lists, with column-dependent keys.
+- Safe areas: standalone Screen owns insets; tabs defer to AppShell. Controls have >=48dp hit areas. Sheets handle back, scrolling and keyboard; normal lists must not hide actions under navigation.
+- Validate light/dark at 320/390/768/1024dp and font scales 1/1.3/2, plus missing covers, long titles, empty/error states and large libraries. Preserve reader gesture/cache behavior, Expo 51 and React Native architecture. Commit independently verified parts locally; no push.
