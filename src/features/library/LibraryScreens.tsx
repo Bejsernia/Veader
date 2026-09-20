@@ -21,7 +21,7 @@ import { getGridLayout } from '../../ui/layout';
 import { useScreenStyles } from '../../ui/screen-styles';
 import { useTheme } from '../../ui/theme';
 import { ContinueReading } from '../shared/continue-reading';
-import { IconButton,Progress,SeriesCard,compactAuthor,formatReadingDuration,readingPosition } from '../shared/library-ui';
+import { IconButton,Progress,SeriesCard,compactAuthor,formatReadingDuration } from '../shared/library-ui';
 
 function SeriesLibrary({ series, importing, refreshLibraries, openSeries, continueSeries, openSources }: { series: LibrarySeries[]; importing: boolean; refreshLibraries: () => void; openSeries: (value: LibrarySeries) => void; continueSeries: (value: LibrarySeries) => void; openSources: () => void }) {
   const [query, setQuery] = useState('');
@@ -54,7 +54,14 @@ function SeriesDetail({ series, chapters: seriesChapters, back, openChapter, con
   const [tagName, setTagName] = useState('');
   const [tagSaving, setTagSaving] = useState(false);
   const tags = series.tags ?? [];
-  const authorTags = tags.filter(tag => tag.kind === 'author');
+  const { fontScale } = useWindowDimensions();
+  const stackedAction = fontScale > 1.3;
+  const chapter = seriesChapters.find(item => item.id === series.currentChapterId);
+  const location = chapter?.currentLocation?.match(/^(?:epub|mobi|pdf):(\d+)$/);
+  const page = location ? Number(location[1]) + 1 : undefined;
+  const position = page && chapter?.pageCount && page <= chapter.pageCount ? '第 ' + page + ' / ' + chapter.pageCount + ' 页' : '本章 ' + Math.round(series.progress * 100) + '%';
+  const formats = [...new Set(seriesChapters.map(item => item.format.toUpperCase()))].join(' / ');
+  const readButton = <Button label={hasHistory ? '继续阅读' : '开始阅读'} icon="book-outline" onPress={continueReading} disabled={!seriesChapters.length} style={{ paddingHorizontal: 12 }} />;
 
   const saveTag = async () => {
     setTagSaving(true);
@@ -76,19 +83,24 @@ function SeriesDetail({ series, chapters: seriesChapters, back, openChapter, con
       <IconButton name="chevron-back" label="返回作品" onPress={back} />
       <IconButton name="settings-outline" label="作品设置" onPress={() => setSeriesActions(true)} />
     </View>
-    <View style={styles.hero}>
+    <View style={[styles.hero, { gap: 16, alignItems: 'flex-start' }]}>
       <BookCover uri={series.coverUri} title={series.title} style={{ width: 108 }} />
-      <View style={styles.heroBody}>
-        <Text style={[styles.detailTitle, isDark && styles.textPrimaryDark]}>{series.title}</Text>
-        <View style={layoutStyles.detailAuthorSlot}>{series.author && <Text numberOfLines={1} style={[{ color: tokens.colors.mutedText, fontSize: 12, marginTop: -2, marginBottom: 5 }, isDark && styles.textMutedDark]}>{compactAuthor(series.author)}</Text>}</View>
-        <Text style={[tokens.typography.caption, { color: tokens.colors.mutedText, marginTop: 12 }]}>{readingPosition(series)}</Text>
-        {hasHistory && <Progress value={series.progress} color={tokens.colors.primary} />}
+      <View style={{ flex: 1, minWidth: 0, minHeight: 162, gap: 8 }}>
+        <Text style={[tokens.typography.pageTitle, { color: tokens.colors.text }]}>{series.title}</Text>
+        {!!series.author && <Text style={[tokens.typography.caption, { color: tokens.colors.mutedText }]}>{series.author}</Text>}
+        <Text style={[tokens.typography.caption, { color: tokens.colors.mutedText }]}>{[formats, '共 ' + seriesChapters.length + ' 章'].filter(Boolean).join(' · ')}</Text>
+        {!stackedAction && <View style={{ marginTop: 'auto', paddingTop: 4 }}>{readButton}</View>}
       </View>
     </View>
-    <View style={styles.tagEditor}>
-      <View style={styles.tagList}>{authorTags.map(renderTag)}{tags.filter(tag => tag.kind === 'general').map(renderTag)}</View>
-    </View>
-    <Button label={hasHistory ? '继续阅读' : '开始阅读'} icon="book-outline" onPress={continueReading} style={{ marginTop: 24 }} />
+    {stackedAction && <View style={{ marginTop: 16 }}>{readButton}</View>}
+    {hasHistory && <View style={{ marginTop: 20, gap: 8 }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 4 }}>
+        <Text style={[tokens.typography.caption, { color: tokens.colors.mutedText }]}>当前读到 · 第 {series.currentChapterNumber || 1} 章</Text>
+        <Text style={[tokens.typography.caption, { color: tokens.colors.text }]}>{position}</Text>
+      </View>
+      <Progress value={series.progress} color={tokens.colors.primary} height={4} />
+    </View>}
+    {tags.some(tag => tag.kind === 'general') && <View style={[styles.tagList, { marginTop: 16 }]}>{tags.filter(tag => tag.kind === 'general').map(renderTag)}</View>}
     <SectionHeader title="目录" trailing={<Text style={{ color: tokens.colors.mutedText }}>共 {seriesChapters.length} 章</Text>} />
   </View>;
 
