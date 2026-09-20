@@ -27,3 +27,12 @@
 - Programmatic seeks retain their target until a new seek or native drag. Late offsets cannot overwrite that target; nonanimated seeks also move the list explicitly.
 - TypeScript passed; Jest: 27 suites / 80 tests. Added offset regressions for late/overlapping seeks and LTR/RTL/vertical double-page targets.
 - Rebuilt and installed the release APK. Android RTL single-page EPUB: 37 -> seek 150 (stable) -> manual swipe 151 -> seek 43 (stable) -> leave/reopen 43. Simulator remains open. Other direction/spread cases have unit coverage, not new device coverage; iOS remains unverified.
+
+## Library and statistics refinements (2026-09-20)
+
+- Phone bookshelves and category grids now use two columns; 1.3 font scale retains two columns, 2.0 reduces density. Column-change/search regression tests passed.
+- Four equal statistics metrics use a 2x2 fallback for large fonts. Recent reading uses the shared chart in a compact Monday-to-Sunday variant with weekly totals and a statistics entry.
+- Book detail places its reading action beside the cover and metadata, with a full-width action at large fonts; duplicate author chips are removed. Page position is shown only when a saved page and page count are available, otherwise the chapter percentage is retained.
+- TypeScript passed and all 27 Jest suites / 82 tests passed, including week boundaries and zero-filled days.
+- Android inspection: default-size light bookshelf, recent chart, statistics and details; 320dp dark bookshelf/details; 2.0-font statistics and details. This exposed fixed chart-height whitespace and insufficient large-font Y-axis height; both corrected. Runtime images are ignored artifacts named `.tmp/adjust-*.png`.
+- This was targeted validation of these changes, not a rerun of the entire earlier device matrix. iOS remains unverified.

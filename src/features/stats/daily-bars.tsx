@@ -47,7 +47,7 @@ export function DailyBars({ summary, isDark, compact = false }: { summary: Readi
   const [containerWidth, setContainerWidth] = useState(0);
   const { fontScale } = useWindowDimensions();
   const rows = compact ? currentWeekRows(summary.daily) : normalizeDailyRows(summary);
-  const plotHeight = compact ? 80 : DAILY_PLOT_HEIGHT;
+  const plotHeight = compact ? 80 : Math.max(DAILY_PLOT_HEIGHT, 90 * fontScale);
   const scale = axisScale(rows);
   const axisWidth = compact ? 0 : Math.max(34, 34 * fontScale);
   const plotViewportWidth = Math.max(1, containerWidth - axisWidth - 8);
@@ -68,13 +68,13 @@ export function DailyBars({ summary, isDark, compact = false }: { summary: Readi
   return <View onLayout={event => setContainerWidth(event.nativeEvent.layout.width)} style={{ marginTop: 16 }}>
     {!compact && <Text style={[tokens.typography.caption, { color: tokens.colors.mutedText, marginBottom: 8 }]}>单位：分钟</Text>}
     <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
-    {!compact && <View style={[statsChartStyles.dailyYAxis, { width: axisWidth }]}>
-      <View style={statsChartStyles.dailyYAxisTicks}>
+    {!compact && <View style={[statsChartStyles.dailyYAxis, { width: axisWidth, height: plotHeight + DAILY_X_AXIS_HEIGHT * fontScale }]}>
+      <View style={[statsChartStyles.dailyYAxisTicks, { height: plotHeight }]}>
         {scale.ticks.map(value => <Text key={value} style={[statsChartStyles.dailyAxisText, isDark && statsChartStyles.dailyAxisTextDark]}>{axisLabel(value)}</Text>)}
       </View>
     </View>}
     <ScrollView horizontal={scrollable} scrollEnabled={scrollable} showsHorizontalScrollIndicator={false} style={{ width: plotViewportWidth }} contentContainerStyle={{ width: plotWidth }}>
-      <View style={[statsChartStyles.dailyPlot, { width: plotWidth }]}>
+      <View style={[statsChartStyles.dailyPlot, { width: plotWidth, height: plotHeight + DAILY_X_AXIS_HEIGHT * fontScale }]}>
         <View style={[statsChartStyles.dailyPlotArea, { height: plotHeight }]}>
           {scale.ticks.map((_, index) => <View key={`grid-${index}`} style={[statsChartStyles.dailyGridLine, isDark && statsChartStyles.dailyGridLineDark, { top: `${index * 25}%` }]} />)}
           <View style={[statsChartStyles.dailyBarsRow, { height: plotHeight }]}>
