@@ -1,6 +1,7 @@
+import { ContinueReading } from '../shared/continue-reading';
 import { Ionicons } from '@expo/vector-icons';
 import React,{ useEffect,useState } from 'react';
-import { Alert,BackHandler,FlatList,SectionList,Text,View,useWindowDimensions } from 'react-native';
+import { Alert,BackHandler,FlatList,SectionList,ScrollView,Text,View,useWindowDimensions } from 'react-native';
 import { tagRepository } from '../../data/tag-repository';
 import type { LibrarySeries,LibraryTag,ReadingStatsSummary,StoredChapter } from '../../domain/models';
 import { BookCover } from '../../ui/components/book-cover';
@@ -19,36 +20,25 @@ import { TextField } from '../../ui/components/text-field';
 import { getGridLayout } from '../../ui/layout';
 import { useScreenStyles } from '../../ui/screen-styles';
 import { useTheme } from '../../ui/theme';
-import { IconButton,Progress,SeriesCard,SeriesProgress,compactAuthor,formatReadingDuration } from '../shared/library-ui';
+import { IconButton,Progress,SeriesCard,SeriesProgress,readingPosition,compactAuthor,formatReadingDuration } from '../shared/library-ui';
 import { normalizeDailyRows } from '../stats/chart-utils';
 
 function SeriesLibrary({ series, importing, refreshLibraries, openSeries, continueSeries, openSources }: { series: LibrarySeries[]; importing: boolean; refreshLibraries: () => void; openSeries: (value: LibrarySeries) => void; continueSeries: (value: LibrarySeries) => void; openSources: () => void }) {
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const { tokens } = useTheme();
-  const { width } = useWindowDimensions();
-  const grid = getGridLayout(width);
+  const { width, fontScale } = useWindowDimensions();
+  const grid = getGridLayout(width, fontScale);
   const visible = series.filter(item => [item.title, item.author, item.tags.map(tag => tag.name).join(' '), item.chapterSearchText].join(' ').toLowerCase().includes(query.trim().toLowerCase()));
-  const featured = series.find(item => item.currentChapterId !== null);
+  const featured = series.filter(item => item.currentChapterId !== null).reduce<LibrarySeries | undefined>((latest, item) => !latest || item.updatedAt > latest.updatedAt ? item : latest, undefined);
   useEffect(() => { if (!searching) return; const sub = BackHandler.addEventListener('hardwareBackPress', () => { setSearching(false); setQuery(''); return true; }); return () => sub.remove(); }, [searching]);
   return <FlatList key={grid.columns} data={visible} numColumns={grid.columns} keyExtractor={item => String(item.id)} showsVerticalScrollIndicator={false}
-    contentContainerStyle={{ padding: 16, paddingHorizontal: grid.pageInset }} columnWrapperStyle={{ gap: grid.gutter }}
+    contentContainerStyle={{ padding: 16, paddingHorizontal: grid.pageInset }} columnWrapperStyle={grid.columns > 1 ? { gap: grid.gutter } : undefined}
     ListHeaderComponent={<View>
-      <ScreenHeader title="我的书架" trailing={<IconButton name={searching ? 'close' : 'search'} label={searching ? '关闭搜索' : '搜索作品'} onPress={() => { setSearching(!searching); setQuery(''); }} />} />
+      <ScreenHeader title="书架" trailing={<View style={{ flexDirection: 'row' }}><IconButton name={searching ? 'close' : 'search'} label={searching ? '关闭搜索' : '搜索作品'} onPress={() => { setSearching(!searching); setQuery(''); }} /><IconButton name="ellipsis-horizontal" label="书架管理" onPress={() => Alert.alert('书架管理', undefined, [{ text: '刷新漫画源', onPress: importing ? undefined : refreshLibraries }, { text: '管理漫画源', onPress: openSources }, { text: '取消', style: 'cancel' }])} /></View>} />
       {searching && <TextField label="搜索作品" value={query} onChangeText={setQuery} autoFocus placeholder="作品名、作者或标签" />}
-      {!searching && featured && <PressableScale accessibilityRole="button" accessibilityLabel={'继续阅读 ' + featured.title} onPress={() => continueSeries(featured)} style={{ flexDirection: 'row', alignItems: 'center', padding: 16, gap: 16, borderRadius: tokens.radius.lg, backgroundColor: tokens.colors.selectedContainer }}>
-        <BookCover uri={featured.coverUri} style={{ width: 86 }} />
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={[tokens.typography.caption, { color: tokens.colors.onSelectedContainer, marginBottom: 4 }]}>继续阅读</Text>
-          <Text numberOfLines={2} style={[tokens.typography.sectionTitle, { color: tokens.colors.onSelectedContainer }]}>{featured.title}</Text>
-          {!!featured.author && <Text numberOfLines={1} style={[tokens.typography.caption, { color: tokens.colors.onSelectedContainer }]}>{compactAuthor(featured.author)}</Text>}
-          <SeriesProgress series={featured} inverse compact />
-        </View>
-      </PressableScale>}
-      <SectionHeader title={searching ? '搜索结果 · ' + visible.length : '全部作品 · ' + series.length} trailing={!searching && <View style={{ flexDirection: 'row' }}>
-        <IconButton name={importing ? 'sync' : 'refresh'} label="刷新漫画源" onPress={importing ? undefined : refreshLibraries} />
-        <IconButton name="folder-open-outline" label="打开漫画源设置" onPress={openSources} />
-      </View>} />
+      {!searching && featured && <ContinueReading series={featured} onPress={() => continueSeries(featured)} />}
+      <SectionHeader title={searching ? '搜索结果' : '全部作品'} trailing={<Text style={[tokens.typography.caption, { color: tokens.colors.mutedText }]}>{visible.length} 部</Text>} />
     </View>}
     ListEmptyComponent={series.length === 0 ? <EmptyState title="尚未设置漫画库" description="选择漫画源，每个一级子文件夹会作为一本作品，其中的文件按章节整理。" actionLabel="添加漫画源" onAction={openSources} /> : <EmptyState icon="search-outline" title="没有匹配的作品" description="试试其他作品名、作者或标签。" />}
     renderItem={({ item, index }) => <View style={{ width: grid.cardWidth }}><SeriesCard series={item} index={index} onPress={() => openSeries(item)} /></View>}
@@ -57,8 +47,6 @@ function SeriesLibrary({ series, importing, refreshLibraries, openSeries, contin
 
 function SeriesDetail({ series, chapters: seriesChapters, back, openChapter, continueReading, uploadCover, onSeriesChanged }: { series: LibrarySeries; chapters: StoredChapter[]; back: () => void; openChapter: (chapter: StoredChapter) => void; continueReading: () => void; uploadCover: () => void; onSeriesChanged?: () => void }) {
   const { styles, layoutStyles } = useScreenStyles();
-  const chapterIndex = series.currentChapterId === null ? -1 : Math.max(0, seriesChapters.findIndex(item => item.id === series.currentChapterId));
-  const chapterProgress = series.currentChapterId === null ? 0 : (chapterIndex + 1) / Math.max(1, seriesChapters.length);
   const { isDark, tokens } = useTheme();
   const hasHistory = series.currentChapterId !== null;
   const [seriesActions, setSeriesActions] = useState(false);
@@ -81,7 +69,7 @@ function SeriesDetail({ series, chapters: seriesChapters, back, openChapter, con
     catch (error) { Alert.alert('删除失败', error instanceof Error ? error.message : String(error)); }
   };
 
-  const renderTag = (tag: LibraryTag) => <TagChip key={tag.id} label={tag.name} author={tag.kind === 'author'} locked={!tag.sources.includes('manual')} onRemove={tag.sources.includes('manual') ? () => { void removeTag(tag); } : undefined} />;
+  const renderTag = (tag: LibraryTag) => <TagChip key={tag.id} label={tag.name} author={tag.kind === 'author'} />;
 
   const header = <View>
     <View style={[styles.detailTop, layoutStyles.detailTopAligned]}>
@@ -89,14 +77,12 @@ function SeriesDetail({ series, chapters: seriesChapters, back, openChapter, con
       <IconButton name="settings-outline" label="作品设置" onPress={() => setSeriesActions(true)} />
     </View>
     <View style={styles.hero}>
-      <BookCover uri={series.coverUri} style={{ width: 112 }} />
+      <BookCover uri={series.coverUri} title={series.title} style={{ width: 108 }} />
       <View style={styles.heroBody}>
         <Text style={[styles.detailTitle, isDark && styles.textPrimaryDark]}>{series.title}</Text>
         <View style={layoutStyles.detailAuthorSlot}>{series.author && <Text numberOfLines={1} style={[{ color: tokens.colors.mutedText, fontSize: 12, marginTop: -2, marginBottom: 5 }, isDark && styles.textMutedDark]}>{compactAuthor(series.author)}</Text>}</View>
-        <Text style={[styles.heroProgress, isDark && styles.textMutedDark]}>章节进度 {chapterIndex + 1} / {seriesChapters.length}</Text>
-        <Progress value={chapterProgress} color={tokens.colors.secondary} />
-        <Text style={[styles.heroProgress, isDark && styles.textMutedDark]}>当前章节 {Math.round(series.progress * 100)}%</Text>
-        <Progress value={series.progress} color={tokens.colors.primary} />
+        <Text style={[tokens.typography.caption, { color: tokens.colors.mutedText, marginTop: 12 }]}>{readingPosition(series)}</Text>
+        {hasHistory && <Progress value={series.progress} color={tokens.colors.primary} />}
       </View>
     </View>
     <View style={styles.tagEditor}>
@@ -116,16 +102,17 @@ function SeriesDetail({ series, chapters: seriesChapters, back, openChapter, con
       ListEmptyComponent={<EmptyState title="尚未找到章节" />}
       renderItem={({ item: chapter }) => <ChapterRow number={chapter.chapterNumber} title={chapter.chapterTitle} meta={chapter.format.toUpperCase()} progress={chapter.progress} current={chapter.id === series.currentChapterId} onPress={() => openChapter(chapter)} />}
     />
-    <BottomSheet visible={seriesActions} onClose={() => setSeriesActions(false)} maxHeight="48%">
-      <View style={styles.sheetHeading}>
+    <BottomSheet visible={seriesActions} onClose={() => setSeriesActions(false)} maxHeight="80%">
+      <ScrollView style={{ flexShrink: 1 }}><View style={styles.sheetHeading}>
         <Text style={[styles.sheetTitle, isDark && styles.textPrimaryDark]}>作品设置</Text>
         <IconButton name="close" label="关闭作品设置" onPress={() => setSeriesActions(false)} />
       </View>
       <SettingsGroup>
+        <View style={styles.tagList}>{tags.map(tag => <TagChip key={tag.id} label={tag.name} locked={!tag.sources.includes('manual')} onRemove={tag.sources.includes('manual') ? () => { void removeTag(tag); } : undefined} />)}</View>
         <SettingsRow title="上传封面" onPress={() => { setSeriesActions(false); uploadCover(); }} />
         <SettingsRow title="添加作者" onPress={() => { setSeriesActions(false); setTagSheet('author'); }} />
         <SettingsRow title="添加标签" onPress={() => { setSeriesActions(false); setTagSheet('general'); }} />
-      </SettingsGroup>
+      </SettingsGroup></ScrollView>
     </BottomSheet>
     <BottomSheet visible={tagSheet !== undefined} onClose={() => setTagSheet(undefined)}>
       <ScreenHeader title={tagSheet === 'author' ? '添加作者标签' : '添加普通标签'} trailing={<IconButton name="close" label="关闭标签编辑" onPress={() => setTagSheet(undefined)} />} />
@@ -137,12 +124,8 @@ function SeriesDetail({ series, chapters: seriesChapters, back, openChapter, con
 
 const formatMinutes = formatReadingDuration;
 
-function StatsSummaryCard({ summary, onPress, isDark }: { summary: ReadingStatsSummary; onPress: () => void; isDark: boolean }) {
-  const { tokens } = useTheme();
-  const { styles } = useScreenStyles();
-  const rows = normalizeDailyRows(summary);
-  const max = Math.max(1, ...rows.map(item => item.durationMs));
-  return <PressableScale onPress={onPress} style={[styles.statsSummaryCard, isDark && styles.cardDark]}><View style={styles.statsSummaryTop}><View><Text style={[styles.statsEyebrow, isDark && styles.textMutedDark]}>最近 7 天</Text><Text style={[styles.statsSummaryValue, isDark && styles.textPrimaryDark]}>{formatMinutes(summary.totalDurationMs)}</Text><Text style={[styles.meta, isDark && styles.textMutedDark]}>{summary.totalPages} 页 · {summary.bookCount} 部作品</Text></View><Ionicons name="stats-chart" size={24} color={isDark ? tokens.colors.primary : tokens.colors.primary} /></View><View style={styles.miniChart}>{rows.map(item => <View key={item.key} style={styles.miniChartColumn}><View style={[styles.miniChartBar, { height: `${Math.max(5, item.durationMs / max * 100)}%` }]} /><Text style={[styles.miniChartLabel, isDark && styles.textMutedDark]}>{item.label}</Text></View>)}</View><Text style={styles.statsLink}>查看详细统计 →</Text></PressableScale>;
+function StatsSummaryCard({ summary, onPress }: { summary: ReadingStatsSummary; onPress: () => void; isDark: boolean }) {
+  return <SettingsRow title="阅读统计" description={'最近 7 天 · ' + formatMinutes(summary.totalDurationMs) + ' · ' + summary.totalPages + ' 页'} onPress={onPress} />;
 }
 
 function Recent({ series, openSeries, clearHistory, statsSummary, openStats }: { series: LibrarySeries[]; openSeries: (value: LibrarySeries) => void; clearHistory: (id: number) => void; statsSummary?: ReadingStatsSummary; openStats: () => void }) {
@@ -161,14 +144,14 @@ function Recent({ series, openSeries, clearHistory, statsSummary, openStats }: {
     renderSectionHeader={({ section }) => <SectionHeader title={section.title} />}
     renderItem={({ item }) => <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
       <PressableScale accessibilityRole="button" accessibilityLabel={'打开 ' + item.title} onPress={() => openSeries(item)} style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-        <BookCover uri={item.coverUri} style={{ width: 64 }} />
+        <BookCover uri={item.coverUri} title={item.title} style={{ width: 48 }} />
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text numberOfLines={2} style={[tokens.typography.label, { color: tokens.colors.text }]}>{item.title}</Text>
           {!!item.author && <Text numberOfLines={1} style={[tokens.typography.caption, { color: tokens.colors.mutedText }]}>{compactAuthor(item.author)}</Text>}
           <Text style={[tokens.typography.caption, { color: tokens.colors.mutedText, marginTop: 8 }]}>阅读至 {item.currentChapterTitle || '章节'} · {Math.round(item.progress * 100)}%</Text>
         </View>
       </PressableScale>
-      <IconButton name="trash-outline" label={'删除 ' + item.title + ' 的阅读记录'} onPress={() => clearHistory(item.id)} />
+      <IconButton name="ellipsis-horizontal" label={'管理 ' + item.title + ' 的阅读记录'} onPress={() => Alert.alert(item.title, '阅读记录', [{ text: '删除阅读记录', style: 'destructive', onPress: () => clearHistory(item.id) }, { text: '取消', style: 'cancel' }])} />
     </View>}
     ListEmptyComponent={<EmptyState icon="time-outline" title="还没有阅读记录" description="开始阅读一个章节后，它会出现在这里。" />}
   />;

@@ -23,20 +23,17 @@ export function IconButton({ name, onPress, dark = false, label, color }: { name
 export const Progress = ProgressBar;
 export const CompactProgress = ProgressBar;
 
+export function readingPosition(series: LibrarySeries) {
+  if (series.currentChapterId === null) return '未读';
+  return '第 ' + (series.currentChapterNumber || 1) + '/' + series.chapterCount + ' 章 · 本章 ' + Math.round(series.progress * 100) + '%';
+}
 export function SeriesProgress({ series, inverse = false, compact = false }: { series: LibrarySeries; inverse?: boolean; compact?: boolean }) {
   const { tokens } = useTheme();
-  const chapterPosition = series.currentChapterNumber ? Math.min(1, Math.max(0, series.currentChapterNumber / Math.max(1, series.chapterCount))) : 0;
-  const color = inverse ? tokens.colors.onSelectedContainer : tokens.colors.mutedText;
-  return <View style={{ gap: 4, marginTop: compact ? 4 : 12 }}>
-    <Text style={[tokens.typography.caption, { color }]}>章节 {series.currentChapterNumber || 0} / {series.chapterCount}</Text>
-    <ProgressBar value={chapterPosition} color={tokens.colors.secondary} />
-    <Text style={[tokens.typography.caption, { color }]}>本章 {Math.round(series.progress * 100)}%</Text>
-    <ProgressBar value={series.progress} />
-  </View>;
+  return <Text style={[tokens.typography.caption, { color: tokens.colors.mutedText }]}>{readingPosition(series)}</Text>;
 }
 export const CompactSeriesProgress = SeriesProgress;
 
 /** Shared book entry; callers own grid sizing and navigation. */
 export function SeriesCard({ series, index, onPress }: { series: LibrarySeries; index: number; onPress: () => void }) {
-  return <BookCard title={series.title} author={series.author ? compactAuthor(series.author) : undefined} coverUri={series.coverUri} index={index} onPress={onPress} footer={<SeriesProgress series={series} compact />} />;
+  return <BookCard title={series.title} coverUri={series.coverUri} index={index} onPress={onPress} footer={<SeriesProgress series={series} compact />} />;
 }
