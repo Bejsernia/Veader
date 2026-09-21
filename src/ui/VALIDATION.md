@@ -45,3 +45,9 @@
 - Android release built and installed, including the new FlashList native module. Its first build required fetching an uncached AndroidX dependency. The unchanged Reanimated native library was reused via the existing Windows build workaround.
 - Device checks: three real books in light mode, unequal cover heights and independent columns after scroll, tab return, keyboard/search-empty and back, statistics right-edge alignment and book/chapter names. Also inspected 320dp dark mode and the single-column 2.0 font-scale layout. Restored normal size/font/light mode and left the emulator open.
 - Screenshots: `.tmp/masonry-home.png`, `masonry-scroll.png`, `masonry-stats.png`, `masonry-small-dark.png`, `masonry-large-font.png`. No device-scale 1000-book FPS claim; iOS not built or tested.
+
+## Centered metrics correction (2026-09-21)
+
+- Replaced edge alignment with four equal-width cells, each with centered value and label; large text retains two equal-width centered columns.
+- TypeScript passed. Rebuilt/installed Android APK and verified the four label centers at x=167/416/665/914px (249px intervals). Screenshot: `.tmp/stats-centered.png`.
+- The Windows Ninja launch workaround reused unchanged SQLite and Reanimated native libraries. No business logic changed; the earlier full test results were not rerun for this style-only correction.

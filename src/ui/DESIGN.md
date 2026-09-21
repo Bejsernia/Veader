@@ -13,7 +13,7 @@ The primary tasks are finding a book and resuming reading. Keep the existing pur
 
 ## September 20 refinements
 
-- Four statistics metrics distributed between the content edges, with the first left-aligned and the last right-aligned; switch to a balanced 2x2 layout above 1.3 font scale.
+- Four equal-width statistics metrics with centered numbers and labels; switch to a balanced 2x2 layout above 1.3 font scale.
 - Share DailyBars between the full statistics chart and the compact weekly preview. Week totals use only Monday through Sunday; distinguish this from the rolling seven-day statistics filter.
 - Detail header groups the cover, title, author, format/chapter metadata and reading action. Place one chapter-position row and progress bar below; omit duplicate author chips. At large text sizes place the action below the header.
 - These refinements supersede the original three-column/detail composition in design-preview.html; runtime screenshots are the current visual reference.
