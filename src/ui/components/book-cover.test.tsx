@@ -30,3 +30,11 @@ it('uses the actual cover ratio and resets it when a recycled cell changes books
   expect(ratio()).toBe(2 / 3);
   expect(screen.getByText('长封面')).toBeTruthy();
 });
+
+it('fills a fixed shelf frame by cropping without distorting the image', () => {
+  const screen = render(<BookCover uri="file:///wide.jpg" title="横幅封面" coverFit="cover" style={{ width: 160 }} />);
+  expect(require('react-native').StyleSheet.flatten((screen.toJSON() as any).props.style).aspectRatio).toBe(2 / 3);
+  expect(screen.UNSAFE_getByType(Image).props.contentFit).toBe('cover');
+  screen.rerender(<BookCover uri="file:///wide.jpg" title="横幅封面" style={{ width: 160 }} />);
+  expect(screen.UNSAFE_getByType(Image).props.contentFit).toBe('contain');
+});

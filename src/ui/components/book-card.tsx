@@ -6,13 +6,13 @@ import { BookCover } from './book-cover';
 import { PressableScale } from './pressable-scale';
 import { ProgressBar } from './progress-bar';
 
-type Props = { naturalCover?: boolean; title: string; author?: string; coverUri?: string | null; progress?: number; footer?: React.ReactNode; index?: number; onPress?: () => void };
+type Props = { naturalCover?: boolean; coverFit?: 'contain' | 'cover'; title: string; author?: string; coverUri?: string | null; progress?: number; footer?: React.ReactNode; index?: number; onPress?: () => void };
 
-export function BookCard({ title, author, coverUri, progress, footer, index = 0, onPress, naturalCover = false }: Props) {
+export function BookCard({ title, author, coverUri, progress, footer, index = 0, onPress, naturalCover = false, coverFit = 'contain' }: Props) {
   const { tokens, reducedMotion } = useTheme();
   return <Animated.View entering={naturalCover || reducedMotion || index >= 6 ? undefined : FadeInUp.delay(Math.min(index, 5) * tokens.motion.stagger).duration(tokens.motion.normal)} style={{ minWidth: 0, marginBottom: tokens.spacing.lg }}>
     <PressableScale onPress={onPress} disabled={!onPress} style={{ minWidth: 0 }}>
-      <BookCover natural={naturalCover} uri={coverUri} title={title} style={{ width: '100%' }} />
+      <BookCover natural={naturalCover} coverFit={coverFit} uri={coverUri} title={title} style={{ width: '100%' }} />
       <Text numberOfLines={2} ellipsizeMode="tail" style={{ color: tokens.colors.text, ...tokens.typography.bookTitle, marginTop: tokens.spacing.sm }}>{title}</Text>
       {author ? <Text numberOfLines={1} ellipsizeMode="tail" style={{ color: tokens.colors.mutedText, fontSize: 12, lineHeight: 18, marginTop: 2 }}>{author}</Text> : null}
       {progress !== undefined && <ProgressBar value={progress} color={tokens.colors.secondary} />}

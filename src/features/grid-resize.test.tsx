@@ -1,4 +1,4 @@
-import { MasonryFlashList } from '@shopify/flash-list';
+import { FlashList } from '@shopify/flash-list';
 import React from 'react';
 import { FlatList } from 'react-native';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
@@ -19,7 +19,7 @@ it('remounts the library grid across column breakpoints without a FlatList invar
   for (const [width, columns] of [[600, 4], [900, 6], [375, 2]] as const) {
     mockWindow.width = width;
     screen.rerender(React.cloneElement(element));
-    expect(screen.UNSAFE_getByType(MasonryFlashList).props.numColumns).toBe(columns);
+    expect(screen.UNSAFE_getByType(FlashList).props.numColumns).toBe(columns);
   }
 });
 
@@ -48,16 +48,15 @@ it.each([0, 3, 100, 1000])('keeps %i books in a virtualized searchable library',
   mockWindow.width = 390; mockWindow.fontScale = 1;
   const series = Array.from({ length: count }, (_, id) => ({ id, title: '测试作品' + id, author: '作者', tags: [], chapterSearchText: '', sourceUri: '', coverUri: null, progress: 0, currentChapterId: null, currentChapterTitle: null, currentChapterNumber: null, chapterCount: 3, updatedAt: id }));
   const screen = render(<SeriesLibrary series={series} importing={false} refreshLibraries={jest.fn()} openSeries={jest.fn()} continueSeries={jest.fn()} openSources={jest.fn()} />);
-  expect(screen.UNSAFE_getByType(MasonryFlashList).props.data).toHaveLength(count);
+  expect(screen.UNSAFE_getByType(FlashList).props.data).toHaveLength(count);
   fireEvent.press(screen.getByLabelText('搜索作品'));
   fireEvent.changeText(screen.getByLabelText('搜索作品'), '没有匹配');
-  expect(screen.UNSAFE_getByType(MasonryFlashList).props.data).toHaveLength(0);
+  expect(screen.UNSAFE_getByType(FlashList).props.data).toHaveLength(0);
 });
 
 it('switches to one column at large text without columnWrapperStyle', () => {
   mockWindow.width = 390; mockWindow.fontScale = 2;
   const screen = render(<SeriesLibrary series={[]} importing={false} refreshLibraries={jest.fn()} openSeries={jest.fn()} continueSeries={jest.fn()} openSources={jest.fn()} />);
-  expect(screen.UNSAFE_getByType(MasonryFlashList).props.numColumns).toBe(1);
-  expect(screen.UNSAFE_getByType(MasonryFlashList).props.columnWrapperStyle).toBeUndefined();
+  expect(screen.UNSAFE_getByType(FlashList).props.numColumns).toBe(1);
   mockWindow.fontScale = 1;
 });

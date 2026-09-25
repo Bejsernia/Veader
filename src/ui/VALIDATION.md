@@ -51,3 +51,9 @@
 - Replaced edge alignment with four equal-width cells, each with centered value and label; large text retains two equal-width centered columns.
 - TypeScript passed. Rebuilt/installed Android APK and verified the four label centers at x=167/416/665/914px (249px intervals). Screenshot: `.tmp/stats-centered.png`.
 - The Windows Ninja launch workaround reused unchanged SQLite and Reanimated native libraries. No business logic changed; the earlier full test results were not rerun for this style-only correction.
+
+## Aligned home shelf (2026-09-25)
+
+- Home returned to the virtualized FlashList row grid: two columns on phones, with column changes keyed for safe remounting. Its cover frames remain 2:3 and use `cover` fit, so source images keep their proportions while overflow is cropped. Other cover contexts keep `contain` fit.
+- TypeScript and 29 Jest suites / 88 tests passed, including grid resizing, empty/search states, 0/3/100/1000 records and cover fitting.
+- Android release APK was rebuilt and installed on the emulator. The first visible row has aligned cover/title/status positions with distinct source aspect ratios; the three appearance modes were also cycled on-device. iOS was not run.

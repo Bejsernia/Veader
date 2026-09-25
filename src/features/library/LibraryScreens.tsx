@@ -1,4 +1,4 @@
-import { MasonryFlashList } from '@shopify/flash-list';
+import { FlashList } from '@shopify/flash-list';
 import { DailyBars } from '../stats/daily-bars';
 import { currentWeekRows } from '../stats/chart-utils';
 import React,{ useEffect,useState } from 'react';
@@ -33,7 +33,7 @@ function SeriesLibrary({ series, importing, refreshLibraries, openSeries, contin
   const visible = series.filter(item => [item.title, item.author, item.tags.map(tag => tag.name).join(' '), item.chapterSearchText].join(' ').toLowerCase().includes(query.trim().toLowerCase()));
   const featured = series.filter(item => item.currentChapterId !== null).reduce<LibrarySeries | undefined>((latest, item) => !latest || item.updatedAt > latest.updatedAt ? item : latest, undefined);
   useEffect(() => { if (!searching) return; const sub = BackHandler.addEventListener('hardwareBackPress', () => { setSearching(false); setQuery(''); return true; }); return () => sub.remove(); }, [searching]);
-  return <MasonryFlashList key={grid.columns} estimatedListSize={{ width, height }} estimatedItemSize={grid.cardWidth * 1.5 + 80 * fontScale} extraData={`${width}:${fontScale}`} data={visible} numColumns={grid.columns} keyExtractor={item => String(item.id)} showsVerticalScrollIndicator={false}
+  return <FlashList key={grid.columns} estimatedListSize={{ width, height }} estimatedItemSize={grid.cardWidth * 1.5 + 80 * fontScale} extraData={`${width}:${fontScale}`} data={visible} numColumns={grid.columns} keyExtractor={item => String(item.id)} showsVerticalScrollIndicator={false}
     contentContainerStyle={{ padding: 16, paddingHorizontal: grid.pageInset }}
     ListHeaderComponent={<View>
       <ScreenHeader title="书架" trailing={<View style={{ flexDirection: 'row' }}><IconButton name={searching ? 'close' : 'search'} label={searching ? '关闭搜索' : '搜索作品'} onPress={() => { setSearching(!searching); setQuery(''); }} /><IconButton name="ellipsis-horizontal" label="书架管理" onPress={() => Alert.alert('书架管理', undefined, [{ text: '刷新漫画源', onPress: importing ? undefined : refreshLibraries }, { text: '管理漫画源', onPress: openSources }, { text: '取消', style: 'cancel' }])} /></View>} />
@@ -42,7 +42,7 @@ function SeriesLibrary({ series, importing, refreshLibraries, openSeries, contin
       <SectionHeader title={searching ? '搜索结果' : '全部作品'} trailing={<Text style={[tokens.typography.caption, { color: tokens.colors.mutedText }]}>{visible.length} 部</Text>} />
     </View>}
     ListEmptyComponent={series.length === 0 ? <EmptyState title="尚未设置漫画库" description="选择漫画源，每个一级子文件夹会作为一本作品，其中的文件按章节整理。" actionLabel="添加漫画源" onAction={openSources} /> : <EmptyState icon="search-outline" title="没有匹配的作品" description="试试其他作品名、作者或标签。" />}
-    renderItem={({ item, index, columnIndex }) => <View style={{ paddingLeft: grid.gutter * columnIndex / grid.columns, paddingRight: grid.gutter * (grid.columns - 1 - columnIndex) / grid.columns }}><SeriesCard naturalCover series={item} index={index} onPress={() => openSeries(item)} /></View>}
+    renderItem={({ item, index }) => <View style={{ paddingLeft: grid.gutter * (index % grid.columns) / grid.columns, paddingRight: grid.gutter * (grid.columns - 1 - index % grid.columns) / grid.columns }}><SeriesCard coverFit="cover" series={item} index={index} onPress={() => openSeries(item)} /></View>}
   />;
 }
 
