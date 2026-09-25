@@ -8,7 +8,7 @@ import { CacheBreakdown,CacheKind,cacheManager } from '../../data/cache-manager'
 import { readerSettingsRepository } from '../../data/reader-settings-repository';
 import type { ReaderPreferences } from '../../preferences';
 import { Button } from '../../ui/components/button';
-import { ChoiceField } from '../../ui/components/choice-field';
+import { IconButton } from '../../ui/components/icon-button';
 import { Screen } from '../../ui/components/screen';
 import { ScreenHeader } from '../../ui/components/screen-header';
 import { SectionHeader } from '../../ui/components/section-header';
@@ -19,14 +19,12 @@ import { useTheme } from '../../ui/theme';
 import { ReaderSettingsFields } from '../reader/ReaderSettingsFields';
 
 export function Me({ navigate }: { navigate: (screen: AppScreen) => void }) {
-  const { mode, setMode, tokens } = useTheme();
-  return <Screen safeArea={false} scroll><ScreenHeader title="设置" />
+  const { isDark, setMode } = useTheme();
+  return <Screen safeArea={false} scroll><ScreenHeader title="设置" trailing={<IconButton name={isDark ? 'sunny-outline' : 'moon-outline'} label={isDark ? '切换为浅色外观' : '切换为深色外观'} onPress={() => setMode(isDark ? 'light' : 'dark')} />} />
     <SectionHeader compact title="内容与存储" />
     <SettingsGroup><SettingsRow title="漫画源" description="本地文件夹与远程目录" onPress={() => navigate('sources')} /><SettingsRow title="缓存" onPress={() => navigate('cache')} /></SettingsGroup>
     <SectionHeader compact title="阅读" />
     <SettingsGroup><SettingsRow title="阅读设置" description="翻页、页面显示与操作方式" onPress={() => navigate('readerSettings')} /></SettingsGroup>
-    <SectionHeader compact title="外观" />
-    <SettingsGroup><ChoiceField label="界面主题" value={mode} onChange={setMode} options={[{ value: 'system', label: '跟随系统' }, { value: 'light', label: '浅色' }, { value: 'dark', label: '深色' }]} /></SettingsGroup>
     <SectionHeader compact title="关于" />
     <SettingsGroup><SettingsRow title="关于 Veader" onPress={() => navigate('about')} /></SettingsGroup>
   </Screen>;
