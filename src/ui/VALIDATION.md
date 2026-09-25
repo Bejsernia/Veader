@@ -57,3 +57,8 @@
 - Home returned to the virtualized FlashList row grid: two columns on phones, with column changes keyed for safe remounting. Its cover frames remain 2:3 and use `cover` fit, so source images keep their proportions while overflow is cropped. Other cover contexts keep `contain` fit.
 - TypeScript and 29 Jest suites / 88 tests passed, including grid resizing, empty/search states, 0/3/100/1000 records and cover fitting.
 - Android release APK was rebuilt and installed on the emulator. The first visible row has aligned cover/title/status positions with distinct source aspect ratios; the three appearance modes were also cycled on-device. iOS was not run.
+
+## Back navigation alignment (2026-09-25)
+
+- Back-enabled ScreenHeader pages use a dedicated 48dp action row, then the page title and optional subtitle below. The selected-category edit action remains opposite the back control. Detail and reader keep their own content compositions but use the same 16dp left inset for the return action; reader title and metadata now appear below it.
+- TypeScript and 30 Jest suites / 89 tests passed. The Android release was rebuilt and installed. Emulator UI bounds for cache, sources, global reader settings, about, statistics, selected category, detail, and the reading overlay all placed the back action at the same phone position; titles were beneath the action row. Reader error state and iOS were not manually exercised.

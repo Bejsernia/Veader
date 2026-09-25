@@ -8,11 +8,16 @@ export function ScreenHeader({ title, subtitle, back, trailing, style }: {
 }) {
   const { tokens } = useTheme();
   return <View style={[{ marginBottom: tokens.spacing.lg }, style]}>
-    <View style={{ minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: tokens.spacing.sm }}>
-      {back && <IconButton name="chevron-back" label="返回" onPress={back} />}
-      <Text accessibilityRole="header" numberOfLines={2} style={[back ? tokens.typography.sectionTitle : tokens.typography.pageTitle, { flex: 1, color: tokens.colors.text }]}>{title}</Text>
+    {back ? <>
+      <View style={{ minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+        <IconButton name="chevron-back" label="返回" onPress={back} />
+        {trailing}
+      </View>
+      <Text accessibilityRole="header" numberOfLines={2} style={[tokens.typography.pageTitle, { color: tokens.colors.text, marginTop: tokens.spacing.sm }]}>{title}</Text>
+    </> : <View style={{ minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: tokens.spacing.sm }}>
+      <Text accessibilityRole="header" numberOfLines={2} style={[tokens.typography.pageTitle, { flex: 1, color: tokens.colors.text }]}>{title}</Text>
       {trailing}
-    </View>
+    </View>}
     {subtitle && <Text style={[tokens.typography.body, { color: tokens.colors.mutedText, marginTop: tokens.spacing.sm }]}>{subtitle}</Text>}
   </View>;
 }

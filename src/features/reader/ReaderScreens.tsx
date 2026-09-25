@@ -34,6 +34,14 @@ let comicDarkTheme = true;
 let comicRtlTheme = false;
 function Slider(props: React.ComponentProps<typeof NativeSlider>) { return <NativeSlider {...props} inverted={comicRtlTheme} />; }
 
+function ReaderBackHeader({ title, subtitle, back, color, mutedColor, titleLines = 1 }: { title: string; subtitle?: string; back: () => void; color: string; mutedColor: string; titleLines?: number }) {
+  return <View style={{ paddingHorizontal: 16, alignItems: 'flex-start' }}>
+    <IconButton name="chevron-back" label="返回作品" onPress={back} color={color} />
+    <Text numberOfLines={titleLines} style={{ color, fontSize: 18, lineHeight: 24, fontWeight: '600', marginTop: 8, textAlign: 'left' }}>{title}</Text>
+    {!!subtitle && <Text numberOfLines={1} style={{ color: mutedColor, fontSize: 12, lineHeight: 18, marginTop: 2, textAlign: 'left' }}>{subtitle}</Text>}
+  </View>;
+}
+
 function EpubPageView({ book, page, width, height, crop = false, dark = comicDarkTheme, sessionId, pageLoader, onAspectRatio, onErrorChange }: { book: StoredBook; page: EpubComicPage; width: number; height: number; crop?: boolean; dark?: boolean; sessionId?: string; pageLoader?: PageLoader; onAspectRatio?: (pageKey: string, ratio: number) => void; onErrorChange?: (index: number, failed: boolean) => void }) {
   const { styles } = useScreenStyles();
   const [source, setSource] = useState<string>(() => crop ? '' : pageLoader?.getState(page.index).uri ?? ''); const [error, setError] = useState(false);
@@ -585,7 +593,7 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
     return <View style={{ width, height, alignItems: 'center', justifyContent: 'center', padding: 0, margin: 0 }}><View style={{ width: contentWidth, height: contentHeight, flexDirection: isVertical ? 'column' : 'row', alignItems: 'center', justifyContent: 'center', padding: 0, margin: 0 }}>{item.map((display, pageIndex) => { const size = sizes[pageIndex]!; return <View key={display.page.imageUri} style={{ width: size.width, height: size.height, margin: 0, padding: 0, overflow: 'hidden' }}><ZoomablePage width={size.width} height={size.height} active={groupIndex === activeGroup} tapEnabled={false} tapAxis={isVertical ? 'vertical' : 'horizontal'} isBoundaryGesture={(dx, dy) => { if (!comic || groupIndex !== activeGroup || zoomedRef.current) return false; const movement = isVertical ? dy : dx; const page = touchStart.current.time ? gestureStartPageRef.current : currentPageRef.current; return chapterBoundaryDelta(movement, readingDirection, page, comic.pages.length) !== 0; }} onBoundarySwipe={(dx, dy) => handleBoundarySwipe(isVertical ? dy : dx, gestureStartPageRef.current)} onZoomChange={value => { if (groupIndex === activeGroup) { zoomedRef.current = value; setZoomed(value); } }} onTap={handleTap}><EpubPageView book={book} page={display.page} width={size.width} height={size.height} crop={crop} dark={dark} sessionId={sessionId} pageLoader={pageLoader} onAspectRatio={reportPageAspectRatio} onErrorChange={reportPageError} /></ZoomablePage></View>; })}</View></View>;
   };
   const pagerAtChapterEdge = Boolean(comic && (currentPageRef.current <= 0 || currentPageRef.current >= comic.pages.length - 1));
-  if (error) return <SafeAreaView style={styles.documentReader}><View style={styles.documentTop}><IconButton name="chevron-back" label="返回作品" onPress={back} dark /><Text style={styles.readerBook}>{book.title}</Text></View><View style={styles.readerMessage}><Ionicons name="warning-outline" size={38} color={readerAppearance.dark.accent} /><Text style={styles.errorText}>{error}</Text></View></SafeAreaView>;
+  if (error) return <SafeAreaView style={styles.documentReader}><View style={styles.documentTop}><ReaderBackHeader title={book.title} titleLines={2} back={back} color={readerAppearance.dark.text} mutedColor={readerAppearance.dark.muted} /></View><View style={styles.readerMessage}><Ionicons name="warning-outline" size={38} color={readerAppearance.dark.accent} /><Text style={styles.errorText}>{error}</Text></View></SafeAreaView>;
   if (!comic) return <SafeAreaView style={styles.documentReader}><View style={styles.readerMessage}><ActivityIndicator color={readerAppearance.dark.accent} size="large" /><Text style={styles.readerChapter}>正在建立 {book.format.toUpperCase()} 页表…</Text></View></SafeAreaView>;
     return <View style={[styles.comicReader, { backgroundColor: readerAppearance[dark ? 'dark' : 'light'].canvas }]}>
       <StatusBar hidden barStyle={menuDark ? 'light-content' : 'dark-content'} />
@@ -701,9 +709,8 @@ function ComicEpubReader({ book, back: navigateBack, onProgress, onSetCover, cha
         {...edgePanResponder.panHandlers}
       />}
       {menu && <>
-        <View style={[styles.readerTop, styles.readerMenuSurface, styles.readerOverlay, { paddingTop: notch ? Math.min(insets.top, 12) : 0, height: (notch ? 76 : 66) * Math.max(1, fontScale), backgroundColor: menuBackground }]}>
-          <IconButton name="chevron-back" onPress={back} color={menuPrimary} />
-          <View style={styles.readerTopTitle}><Text numberOfLines={1} style={[styles.readerBook, { color: menuPrimary }]}>{comic.title}</Text><Text style={[styles.readerChapter, { color: menuMuted }]}>{comic.author} · {readingDirection === 'rtl' ? '从右到左' : readingDirection === 'vertical' ? '从上到下' : '从左到右'}</Text></View>
+        <View style={[styles.readerTop, styles.readerMenuSurface, styles.readerOverlay, { paddingTop: notch ? Math.max(16, Math.min(insets.top, 24)) : 16, height: (notch ? 128 : 120) * Math.max(1, fontScale), backgroundColor: menuBackground }]}>
+          <ReaderBackHeader title={comic.title} subtitle={[comic.author, readingDirection === 'rtl' ? '从右到左' : readingDirection === 'vertical' ? '从上到下' : '从左到右'].filter(Boolean).join(' · ')} back={back} color={menuPrimary} mutedColor={menuMuted} />
         </View>
         <View style={[styles.epubBottom, styles.readerMenuSurface, styles.readerOverlay, { backgroundColor: menuBackground }]}>
           <Text numberOfLines={1} style={[styles.chapterLabel, { color: menuMuted }]}>阅读进度</Text>
