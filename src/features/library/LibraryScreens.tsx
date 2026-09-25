@@ -137,7 +137,7 @@ function SeriesDetail({ series, chapters: seriesChapters, back, openChapter, con
 
 const formatMinutes = formatReadingDuration;
 
-function StatsSummaryCard({ summary, onPress }: { summary: ReadingStatsSummary; onPress: () => void; isDark: boolean }) {
+function StatsSummaryCard({ summary, onPress, width }: { summary: ReadingStatsSummary; onPress: () => void; width: number }) {
   const { tokens, isDark } = useTheme();
   const total = currentWeekRows(summary.daily).reduce((sum, row) => sum + row.durationMs, 0);
   return <View style={{ backgroundColor: tokens.colors.surface, borderRadius: 12, padding: 16 }}>
@@ -145,7 +145,7 @@ function StatsSummaryCard({ summary, onPress }: { summary: ReadingStatsSummary; 
       <View><Text style={[tokens.typography.caption, { color: tokens.colors.mutedText }]}>本周阅读</Text><Text style={[tokens.typography.sectionTitle, { color: tokens.colors.text, marginTop: 4 }]}>{formatMinutes(total)}</Text></View>
       <Button label="阅读统计 ›" variant="ghost" onPress={onPress} style={{ paddingHorizontal: 8 }} />
     </View>
-    <DailyBars summary={summary} isDark={isDark} compact />
+    <DailyBars summary={summary} isDark={isDark} compact initialWidth={width - 2 * getGridLayout(width).pageInset - 32} />
   </View>;
 }
 
@@ -161,7 +161,7 @@ function Recent({ series, openSeries, clearHistory, statsSummary, openStats }: {
     { title: '更早', data: readSeries.filter(item => item.updatedAt < week.getTime()) },
   ].filter(section => section.data.length > 0);
   return <SectionList sections={sections} keyExtractor={item => String(item.id)} stickySectionHeadersEnabled={false} contentContainerStyle={{ padding: 16, paddingHorizontal: getGridLayout(width).pageInset }}
-    ListHeaderComponent={<View><ScreenHeader title="最近阅读" />{statsSummary && <StatsSummaryCard summary={statsSummary} onPress={openStats} isDark={isDark} />}</View>}
+    ListHeaderComponent={<View><ScreenHeader title="最近阅读" />{statsSummary && <StatsSummaryCard summary={statsSummary} onPress={openStats} width={width} />}</View>}
     renderSectionHeader={({ section }) => <SectionHeader title={section.title} />}
     renderItem={({ item }) => <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
       <PressableScale accessibilityRole="button" accessibilityLabel={'打开 ' + item.title} onPress={() => openSeries(item)} style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 12 }}>

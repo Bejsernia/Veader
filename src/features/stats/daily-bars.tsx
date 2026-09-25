@@ -41,10 +41,10 @@ function displayDateLabel(label: string, range: ReadingStatsRange) {
   return range === '30d' ? label.split('/').pop() ?? label : label;
 }
 
-export function DailyBars({ summary, isDark, compact = false }: { summary: ReadingStatsSummary; isDark: boolean; compact?: boolean }) {
+export function DailyBars({ summary, isDark, compact = false, initialWidth = 0 }: { summary: ReadingStatsSummary; isDark: boolean; compact?: boolean; initialWidth?: number }) {
   const { styles, statsChartStyles } = useScreenStyles();
   const { tokens } = useTheme();
-  const [containerWidth, setContainerWidth] = useState(0);
+  const [containerWidth, setContainerWidth] = useState(initialWidth);
   const { fontScale } = useWindowDimensions();
   const rows = compact ? currentWeekRows(summary.daily) : normalizeDailyRows(summary);
   const plotHeight = compact ? 80 : Math.max(DAILY_PLOT_HEIGHT, 90 * fontScale);
@@ -94,4 +94,3 @@ export function DailyBars({ summary, isDark, compact = false }: { summary: Readi
     </View>
   </View>;
 }
-
