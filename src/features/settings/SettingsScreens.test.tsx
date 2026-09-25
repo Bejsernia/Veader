@@ -1,10 +1,12 @@
 jest.mock('../../ui/components/bottom-sheet', () => ({ BottomSheet: ({ visible, children }: any) => visible ? children : null }));
 import React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
-import { CacheSettings } from './SettingsScreens';
+import { CacheSettings, Me } from './SettingsScreens';
 import { ReaderSettingsFields } from '../reader/ReaderSettingsFields';
 import { cacheManager } from '../../data/cache-manager';
-jest.mock('../../ui/theme', () => ({ useTheme: () => ({ tokens: jest.requireActual('../../ui/theme').lightTokens, reducedMotion: true }) }));
+let mockThemeMode: 'system' | 'light' | 'dark' = 'system';
+const mockSetThemeMode = jest.fn();
+jest.mock('../../ui/theme', () => ({ useTheme: () => ({ tokens: jest.requireActual('../../ui/theme').lightTokens, reducedMotion: true, mode: mockThemeMode, setMode: mockSetThemeMode }) }));
 jest.mock('expo-constants', () => ({ __esModule: true, default: { expoConfig: { version: '0.1.0' } } }));
 jest.mock('../../data/reader-settings-repository', () => ({}));
 jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: require('react-native').View }));
@@ -13,6 +15,20 @@ jest.mock('../../data/cache-manager', () => ({ cacheManager: {
   getPageLimitMb: jest.fn(async () => 512), getSourceLimitMb: jest.fn(async () => 2048),
   setPageLimitMb: jest.fn(async () => 256), setSourceLimitMb: jest.fn(async () => 2048), clear: jest.fn(),
 } }));
+
+it('cycles the settings header through system, light, and dark appearance', () => {
+  mockThemeMode = 'system';
+  mockSetThemeMode.mockClear();
+  const screen = render(<Me navigate={jest.fn()} />);
+  fireEvent.press(screen.getByLabelText('当前跟随系统外观，切换为浅色'));
+  expect(mockSetThemeMode).toHaveBeenLastCalledWith('light');
+  mockThemeMode = 'light'; screen.rerender(<Me navigate={jest.fn()} />);
+  fireEvent.press(screen.getByLabelText('当前浅色外观，切换为深色'));
+  expect(mockSetThemeMode).toHaveBeenLastCalledWith('dark');
+  mockThemeMode = 'dark'; screen.rerender(<Me navigate={jest.fn()} />);
+  fireEvent.press(screen.getByLabelText('当前深色外观，切换为跟随系统'));
+  expect(mockSetThemeMode).toHaveBeenLastCalledWith('system');
+});
 
 it('keeps cache edits as drafts, rejects invalid limits and saves only on explicit action', async () => {
   const screen = render(<CacheSettings back={jest.fn()} />);

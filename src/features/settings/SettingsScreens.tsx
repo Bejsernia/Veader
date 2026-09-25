@@ -7,6 +7,7 @@ import { formatCacheSize } from '../../cache';
 import { CacheBreakdown,CacheKind,cacheManager } from '../../data/cache-manager';
 import { readerSettingsRepository } from '../../data/reader-settings-repository';
 import type { ReaderPreferences } from '../../preferences';
+import type { ThemeMode } from '../../preferences';
 import { Button } from '../../ui/components/button';
 import { IconButton } from '../../ui/components/icon-button';
 import { Screen } from '../../ui/components/screen';
@@ -19,8 +20,11 @@ import { useTheme } from '../../ui/theme';
 import { ReaderSettingsFields } from '../reader/ReaderSettingsFields';
 
 export function Me({ navigate }: { navigate: (screen: AppScreen) => void }) {
-  const { isDark, setMode } = useTheme();
-  return <Screen safeArea={false} scroll><ScreenHeader title="设置" trailing={<IconButton name={isDark ? 'sunny-outline' : 'moon-outline'} label={isDark ? '切换为浅色外观' : '切换为深色外观'} onPress={() => setMode(isDark ? 'light' : 'dark')} />} />
+  const { mode, setMode } = useTheme();
+  const nextMode: ThemeMode = mode === 'system' ? 'light' : mode === 'light' ? 'dark' : 'system';
+  const modeNames = { system: '跟随系统', light: '浅色', dark: '深色' };
+  const modeIcons = { system: 'phone-portrait-outline', light: 'sunny-outline', dark: 'moon-outline' } as const;
+  return <Screen safeArea={false} scroll><ScreenHeader title="设置" trailing={<IconButton name={modeIcons[mode]} label={`当前${modeNames[mode]}外观，切换为${modeNames[nextMode]}`} onPress={() => setMode(nextMode)} />} />
     <SectionHeader compact title="内容与存储" />
     <SettingsGroup><SettingsRow title="漫画源" description="本地文件夹与远程目录" onPress={() => navigate('sources')} /><SettingsRow title="缓存" onPress={() => navigate('cache')} /></SettingsGroup>
     <SectionHeader compact title="阅读" />
